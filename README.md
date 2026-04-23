@@ -148,6 +148,7 @@ spec-drift --format sarif --deny warning --baseline .spec-drift.baseline.json
 | `--config <path>`                         | Path to `spec-drift.toml`. Default: walk up from CWD.                   |
 | `--fix-prompt`                            | Emit a structured correction prompt instead of a report.                |
 | `--strict`                                | Promote heuristic rules one severity level.                             |
+| `--diff <ref>`                            | Only analyze files changed since the given git ref (e.g. `HEAD`).       |
 | `--no-llm`                                | Disable all LLM-backed checks regardless of config.                     |
 
 ### Exit codes

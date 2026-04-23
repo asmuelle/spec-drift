@@ -32,6 +32,31 @@ impl RuleId {
             Self::EnvMismatch => "env_mismatch",
         }
     }
+
+    /// Confidence class — matches the README confidence matrix.
+    /// `--strict` promotes heuristic and experimental rules one severity level.
+    pub fn confidence(&self) -> Confidence {
+        match self {
+            Self::SymbolAbsence
+            | Self::CompileFailure
+            | Self::DeprecatedUsage
+            | Self::GhostCommand => Confidence::Deterministic,
+            Self::ConstraintViolation
+            | Self::LyingTest
+            | Self::MissingCoverage
+            | Self::EnvMismatch => Confidence::Heuristic,
+            Self::OutdatedLogic | Self::LogicGap => Confidence::Experimental,
+        }
+    }
+}
+
+/// Confidence class of a [`RuleId`]. Maps 1:1 to the README confidence matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    Deterministic,
+    Heuristic,
+    Experimental,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -48,6 +73,15 @@ impl Severity {
             Self::Notice => "🟡 NOTICE",
             Self::Warning => "⚠️  WARNING",
             Self::Critical => "❌ CRITICAL",
+        }
+    }
+
+    /// Promote one step. `Critical` saturates.
+    pub fn promoted(self) -> Self {
+        match self {
+            Self::Notice => Self::Warning,
+            Self::Warning => Self::Critical,
+            Self::Critical => Self::Critical,
         }
     }
 }
@@ -129,6 +163,22 @@ mod tests {
     fn severity_orders_notice_lt_warning_lt_critical() {
         assert!(Severity::Notice < Severity::Warning);
         assert!(Severity::Warning < Severity::Critical);
+    }
+
+    #[test]
+    fn severity_promoted_saturates_at_critical() {
+        assert_eq!(Severity::Notice.promoted(), Severity::Warning);
+        assert_eq!(Severity::Warning.promoted(), Severity::Critical);
+        assert_eq!(Severity::Critical.promoted(), Severity::Critical);
+    }
+
+    #[test]
+    fn confidence_matches_readme_matrix() {
+        assert_eq!(RuleId::SymbolAbsence.confidence(), Confidence::Deterministic);
+        assert_eq!(RuleId::GhostCommand.confidence(), Confidence::Deterministic);
+        assert_eq!(RuleId::LyingTest.confidence(), Confidence::Heuristic);
+        assert_eq!(RuleId::EnvMismatch.confidence(), Confidence::Heuristic);
+        assert_eq!(RuleId::OutdatedLogic.confidence(), Confidence::Experimental);
     }
 
     #[test]

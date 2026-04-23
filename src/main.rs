@@ -1,7 +1,7 @@
 use clap::Parser;
 use spec_drift::analyzers::{
     CiAnalyzer, ConstraintAnalyzer, DeprecatedUsageAnalyzer, DocsAnalyzer, DriftAnalyzer,
-    ExamplesAnalyzer, MissingCoverageAnalyzer, TestsAnalyzer,
+    EnvMismatchAnalyzer, ExamplesAnalyzer, MissingCoverageAnalyzer, TestsAnalyzer,
 };
 use spec_drift::baseline;
 use spec_drift::config::Config;
@@ -66,6 +66,10 @@ struct Cli {
     /// Exit non-zero only when a divergence at or above this severity exists.
     #[arg(long, value_parser = ["notice", "warning", "critical"], default_value = "notice")]
     deny: String,
+
+    /// Promote every non-deterministic rule by one severity level.
+    #[arg(long)]
+    strict: bool,
 }
 
 fn main() -> ExitCode {
@@ -127,6 +131,10 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         divergences = baseline::subtract(divergences, &baseline);
     }
 
+    if cli.strict {
+        spec_drift::apply_strict(&mut divergences);
+    }
+
     let rendered = if cli.fix_prompt {
         FixPromptReporter.render(&divergences)
     } else {
@@ -177,6 +185,7 @@ fn select_analyzers(cli: &Cli, config: &Config) -> Vec<Box<dyn DriftAnalyzer>> {
     }
     if !any_specific || cli.ci {
         v.push(Box::new(CiAnalyzer::default()));
+        v.push(Box::new(EnvMismatchAnalyzer));
     }
     v
 }

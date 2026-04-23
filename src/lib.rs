@@ -19,16 +19,26 @@ pub mod suppress;
 pub use config::Config;
 pub use context::ProjectContext;
 pub use domain::{
-    ClaimKind, CodeFact, Divergence, FactKind, Location, RuleId, Severity, SpecClaim,
+    ClaimKind, CodeFact, Confidence, Divergence, FactKind, Location, RuleId, Severity, SpecClaim,
 };
 pub use error::SpecDriftError;
 
 use analyzers::DriftAnalyzer;
+use rayon::prelude::*;
 
-/// Execute every analyzer and return divergences sorted deterministically by
-/// `(file, line, rule)` so output can be diffed between runs.
+/// Execute every analyzer in parallel and return divergences sorted
+/// deterministically by `(file, line, rule)` so output can be diffed between
+/// runs.
+///
+/// Analyzers are independent by construction — see the `DriftAnalyzer` trait
+/// docstring — so `par_iter` is safe and parallelizes nicely on multi-pillar
+/// runs where one analyzer (e.g. `ExamplesAnalyzer`) spends most of its time
+/// blocked on `cargo`.
 pub fn run(ctx: &ProjectContext, analyzers: &[Box<dyn DriftAnalyzer>]) -> Vec<Divergence> {
-    let mut all: Vec<Divergence> = analyzers.iter().flat_map(|a| a.analyze(ctx)).collect();
+    let mut all: Vec<Divergence> = analyzers
+        .par_iter()
+        .flat_map_iter(|a| a.analyze(ctx))
+        .collect();
 
     all.sort_by(|a, b| {
         a.location
@@ -50,4 +60,15 @@ pub fn apply_config(
     divs.retain(|d| !cfg.is_suppressed(d, root));
     cfg.apply_severity_overrides(&mut divs);
     divs
+}
+
+/// Promote every non-deterministic divergence one severity level. Mirrors the
+/// `--strict` CLI flag — deterministic rules stay untouched because they
+/// already carry unambiguous verdicts.
+pub fn apply_strict(divs: &mut [Divergence]) {
+    for d in divs.iter_mut() {
+        if d.rule.confidence() != Confidence::Deterministic {
+            d.severity = d.severity.promoted();
+        }
+    }
 }
