@@ -45,6 +45,12 @@ runs:
         path: ~/.cargo/bin/spec-drift
         key: spec-drift-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
+    - name: Install Rust toolchain
+      if: steps.cache-spec-drift.outputs.cache-hit != 'true'
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: "1.95"
+
     - name: Install spec-drift
       if: steps.cache-spec-drift.outputs.cache-hit != 'true'
       shell: bash
