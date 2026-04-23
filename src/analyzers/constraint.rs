@@ -139,6 +139,8 @@ fn compare_return_type(
             normalize(&actual)
         ),
         risk: "Functions under this glob have drifted from the stated contract.".to_string(),
+        attribution: None,
+
     });
 }
 

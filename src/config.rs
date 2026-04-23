@@ -329,6 +329,8 @@ mod tests {
             stated: "`legacy_shim` exists in the codebase".into(),
             reality: "not found".into(),
             risk: "x".into(),
+            attribution: None,
+
         }
     }
 

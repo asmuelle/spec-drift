@@ -7,6 +7,7 @@
 
 pub mod analyzers;
 pub mod baseline;
+pub mod blame;
 pub mod config;
 pub mod context;
 pub mod domain;
@@ -20,7 +21,8 @@ pub mod suppress;
 pub use config::Config;
 pub use context::ProjectContext;
 pub use domain::{
-    ClaimKind, CodeFact, Confidence, Divergence, FactKind, Location, RuleId, Severity, SpecClaim,
+    Attribution, ClaimKind, CodeFact, Confidence, Divergence, FactKind, Location, RuleId,
+    Severity, SpecClaim,
 };
 pub use error::SpecDriftError;
 

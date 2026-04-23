@@ -75,6 +75,11 @@ struct Cli {
     /// Disable every LLM-backed rule, regardless of `[llm]` config.
     #[arg(long)]
     no_llm: bool,
+
+    /// Attribute each divergence to the commit/author that wrote the source line.
+    /// Spawns one `git blame` per divergence; off by default.
+    #[arg(long)]
+    blame: bool,
 }
 
 fn main() -> ExitCode {
@@ -138,6 +143,14 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 
     if cli.strict {
         spec_drift::apply_strict(&mut divergences);
+    }
+
+    if cli.blame {
+        spec_drift::blame::apply(
+            &mut divergences,
+            &root,
+            &spec_drift::blame::GitBlameEngine,
+        );
     }
 
     let rendered = if cli.fix_prompt {

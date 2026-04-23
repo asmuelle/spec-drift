@@ -77,6 +77,8 @@ impl DriftAnalyzer for MissingCoverageAnalyzer {
                     stated: format!("`{leaf}` is a capability the project exposes"),
                     reality: format!("no test references `{leaf}` by name"),
                     risk: "Capability claimed in the docs has no guard-rail in tests.".to_string(),
+                    attribution: None,
+
                 });
             }
         }

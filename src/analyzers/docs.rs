@@ -61,6 +61,8 @@ impl DriftAnalyzer for DocsAnalyzer {
                         ),
                         risk: "New developers and AI agents will reach for a non-existent API."
                             .to_string(),
+                        attribution: None,
+
                     });
                 }
             }

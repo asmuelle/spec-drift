@@ -55,6 +55,14 @@ impl Reporter for FixPromptReporter {
             writeln!(out, "- **Stated:** {}", d.stated).unwrap();
             writeln!(out, "- **Reality:** {}", d.reality).unwrap();
             writeln!(out, "- **Risk:** {}", d.risk).unwrap();
+            if let Some(a) = &d.attribution {
+                writeln!(
+                    out,
+                    "- **Attribution:** `{}` by {} on {} — _{}_",
+                    a.commit, a.author, a.date, a.summary
+                )
+                .unwrap();
+            }
             out.push('\n');
         }
         out
@@ -74,6 +82,8 @@ mod tests {
             stated: "`Client::new` exists".into(),
             reality: "no `new` found in sources".into(),
             risk: "docs lie".into(),
+            attribution: None,
+
         }
     }
 

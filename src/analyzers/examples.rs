@@ -184,6 +184,8 @@ fn parse_cargo_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence>
             stated: format!("`{}` demonstrates the current API", rel.display()),
             reality: format!("`cargo check --examples` fails: {}", message.message),
             risk: "Users copy from broken examples and ship broken code.".to_string(),
+            attribution: None,
+
         });
     }
 

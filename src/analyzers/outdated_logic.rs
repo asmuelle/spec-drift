@@ -75,6 +75,8 @@ impl DriftAnalyzer for OutdatedLogicAnalyzer {
                     stated: "section describes current behavior".into(),
                     reality: verdict.reason,
                     risk: "Docs teach behavior the code no longer implements.".into(),
+                    attribution: None,
+
                 });
             }
         }

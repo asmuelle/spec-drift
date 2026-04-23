@@ -149,6 +149,7 @@ spec-drift --format sarif --deny warning --baseline .spec-drift.baseline.json
 | `--fix-prompt`                            | Emit a structured correction prompt instead of a report.                |
 | `--strict`                                | Promote heuristic rules one severity level.                             |
 | `--diff <ref>`                            | Only analyze files changed since the given git ref (e.g. `HEAD`).       |
+| `--blame`                                 | Attribute each divergence to the commit/author/date that wrote the line.|
 | `--no-llm`                                | Disable all LLM-backed checks regardless of config.                     |
 
 ### Exit codes

@@ -133,6 +133,8 @@ fn parse_clippy_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence
             stated: format!("`{}` demonstrates supported API", rel.display()),
             reality: format!("example uses deprecated API: {}", message.message),
             risk: "Examples teach users a pattern the codebase is retiring.".to_string(),
+            attribution: None,
+
         });
     }
 

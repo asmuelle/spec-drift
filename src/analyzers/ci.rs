@@ -181,6 +181,8 @@ fn inspect_cargo_line(
                 reality: format!("`{name}` is not a member of the workspace"),
                 risk: "CI exercises a target that no longer exists; the step is a no-op at best."
                     .to_string(),
+                attribution: None,
+
             });
         }
     }
@@ -195,6 +197,8 @@ fn inspect_cargo_line(
                 stated: format!("CI builds/runs bin `{name}`"),
                 reality: format!("no bin target named `{name}` in the workspace"),
                 risk: "CI step refers to a bin that doesn't exist.".to_string(),
+                attribution: None,
+
             });
         }
     }

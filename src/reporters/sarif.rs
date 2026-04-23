@@ -46,6 +46,9 @@ impl Reporter for SarifReporter {
                         },
                     },
                 }],
+                partial_fingerprints: d.attribution.as_ref().map(|a| SarifFingerprints {
+                    commit_sha: a.commit.clone(),
+                }),
             })
             .collect();
 
@@ -117,6 +120,16 @@ struct SarifResult {
     level: &'static str,
     message: SarifText,
     locations: Vec<SarifLocation>,
+    #[serde(rename = "partialFingerprints", skip_serializing_if = "Option::is_none")]
+    partial_fingerprints: Option<SarifFingerprints>,
+}
+
+#[derive(Serialize)]
+struct SarifFingerprints {
+    /// Matches GitHub's suggested `commitSha` fingerprint key for deduping
+    /// results across runs once the offending commit is known.
+    #[serde(rename = "commitSha")]
+    commit_sha: String,
 }
 
 #[derive(Serialize)]
@@ -161,6 +174,8 @@ mod tests {
             stated: "X exists".into(),
             reality: "X doesn't exist".into(),
             risk: "bad".into(),
+            attribution: None,
+
         }
     }
 

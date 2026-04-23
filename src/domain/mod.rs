@@ -144,6 +144,24 @@ pub struct Divergence {
     pub stated: String,
     pub reality: String,
     pub risk: String,
+    /// Optional blame attribution. `None` when attribution was not requested
+    /// or could not be resolved. Serialized only when present so old baseline
+    /// snapshots continue to parse without change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<Attribution>,
+}
+
+/// Git attribution for the line that carries a spec claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attribution {
+    /// Short commit SHA (first 7 chars).
+    pub commit: String,
+    /// Author name as recorded by git.
+    pub author: String,
+    /// Author date in `YYYY-MM-DD` form.
+    pub date: String,
+    /// Commit summary (subject line).
+    pub summary: String,
 }
 
 #[cfg(test)]

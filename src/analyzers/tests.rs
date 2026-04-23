@@ -93,6 +93,8 @@ fn inspect_test(f: &syn::ItemFn, path: &Path, out: &mut Vec<Divergence>) {
             stated: format!("`{name}` verifies a negative / failure path"),
             reality: format!("`{name}` {reason}"),
             risk: "The test is green but proves nothing about the stated contract.".to_string(),
+            attribution: None,
+
         });
     }
 }
@@ -214,19 +216,24 @@ fn assertion_looks_negative(name: &str, tokens: &str) -> bool {
     if name == "panic" {
         return true;
     }
-    let t = tokens.to_ascii_lowercase();
-    // Common negative shapes: assert!(x.is_err()), assert!(!x), assert!(!x.contains(...))
-    // assert_eq!(result.status(), 403), assert!(matches!(e, Err(_)))
+    // `syn` emits `TokenStream::to_string()` with spaces around punctuation
+    // ("res . is_none ()"), so naive substring checks miss real negative
+    // assertions. Normalize by stripping whitespace and lowercasing before
+    // matching.
+    let t: String = tokens
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
     t.starts_with('!')
         || t.contains(".is_err")
         || t.contains(".is_none")
-        || t.contains("is_err ()")
-        || t.contains("matches ! (")
+        || t.contains("matches!(")
+        || t.contains("err(")
+        || t.contains(".is_not_")
         || t.contains("403")
         || t.contains("401")
         || t.contains("404")
-        || t.contains("err (")
-        || t.contains(".is_not_")
 }
 
 #[cfg(test)]

@@ -67,6 +67,8 @@ impl DriftAnalyzer for LogicGapAnalyzer {
                 stated: "example narrative describes current API usage".into(),
                 reality: verdict.reason,
                 risk: "Example teaches a pattern the public API no longer supports.".into(),
+                attribution: None,
+
             });
         }
 

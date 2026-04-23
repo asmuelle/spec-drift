@@ -70,6 +70,8 @@ mod tests {
             stated: stated.into(),
             reality: "r".into(),
             risk: "k".into(),
+            attribution: None,
+
         }
     }
 
