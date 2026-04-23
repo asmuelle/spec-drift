@@ -1,4 +1,7 @@
+pub mod ci;
 pub mod docs;
+pub mod examples;
+pub mod tests;
 
 use crate::context::ProjectContext;
 use crate::domain::Divergence;
@@ -13,4 +16,7 @@ pub trait DriftAnalyzer {
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence>;
 }
 
+pub use ci::{CargoMetadata, CiAnalyzer};
 pub use docs::DocsAnalyzer;
+pub use examples::{CargoRunner, ExamplesAnalyzer};
+pub use tests::TestsAnalyzer;

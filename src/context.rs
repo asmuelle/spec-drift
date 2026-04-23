@@ -10,6 +10,7 @@ pub struct ProjectContext {
     pub rust_files: Vec<PathBuf>,
     pub markdown_files: Vec<PathBuf>,
     pub yaml_files: Vec<PathBuf>,
+    pub makefile_files: Vec<PathBuf>,
     pub code_facts: Vec<CodeFact>,
 }
 

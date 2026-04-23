@@ -18,4 +18,7 @@ pub enum SpecDriftError {
 
     #[error("project walk failed: {0}")]
     Walk(#[from] ignore::Error),
+
+    #[error("invalid config at {path}: {message}")]
+    Config { path: PathBuf, message: String },
 }

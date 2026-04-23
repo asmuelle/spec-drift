@@ -1,9 +1,13 @@
 use clap::Parser;
-use spec_drift::analyzers::{DocsAnalyzer, DriftAnalyzer};
+use spec_drift::analyzers::{
+    CiAnalyzer, DocsAnalyzer, DriftAnalyzer, ExamplesAnalyzer, TestsAnalyzer,
+};
+use spec_drift::config::Config;
 use spec_drift::context::ProjectContext;
+use spec_drift::domain::Severity;
 use spec_drift::parsers::RustParser;
-use spec_drift::reporters::{HumanReporter, JsonReporter, Reporter};
-use spec_drift::sources::FsWalker;
+use spec_drift::reporters::{FixPromptReporter, HumanReporter, JsonReporter, Reporter, SarifReporter};
+use spec_drift::sources::{FsWalker, GitHistory};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -19,8 +23,40 @@ struct Cli {
     root: PathBuf,
 
     /// Output format.
-    #[arg(long, value_parser = ["human", "json"], default_value = "human")]
+    #[arg(long, value_parser = ["human", "json", "sarif"], default_value = "human")]
     format: String,
+
+    /// Emit a structured correction prompt instead of a report. Overrides --format.
+    #[arg(long)]
+    fix_prompt: bool,
+
+    /// Path to `spec-drift.toml`. Defaults to walking up from `--root`.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
+    /// Only analyze files changed since this git ref (e.g. `HEAD`, `origin/main`).
+    #[arg(long)]
+    diff: Option<String>,
+
+    /// Run only the docs pillar.
+    #[arg(long, conflicts_with_all = ["examples", "tests", "ci"])]
+    docs: bool,
+
+    /// Run only the examples pillar.
+    #[arg(long, conflicts_with_all = ["docs", "tests", "ci"])]
+    examples: bool,
+
+    /// Run only the tests pillar.
+    #[arg(long, conflicts_with_all = ["docs", "examples", "ci"])]
+    tests: bool,
+
+    /// Run only the CI pillar.
+    #[arg(long, conflicts_with_all = ["docs", "examples", "tests"])]
+    ci: bool,
+
+    /// Exit non-zero only when a divergence at or above this severity exists.
+    #[arg(long, value_parser = ["notice", "warning", "critical"], default_value = "notice")]
+    deny: String,
 }
 
 fn main() -> ExitCode {
@@ -36,12 +72,34 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let root = cli.root.canonicalize()?;
-    let files = FsWalker::walk(&root)?;
+
+    let config_path = cli
+        .config
+        .clone()
+        .or_else(|| Config::discover(&root))
+        .unwrap_or_else(|| root.join("spec-drift.toml"));
+    let config = Config::load(&config_path)?;
+
+    let mut files = FsWalker::walk(&root)?;
+    if let Some(reference) = cli.diff.as_deref() {
+        match GitHistory::changed_files(&root, reference) {
+            Some(changed) => {
+                files = GitHistory::narrow(files, &changed);
+            }
+            None => {
+                eprintln!(
+                    "spec-drift: --diff {reference}: git unavailable or ref unknown; \
+                     scanning full tree."
+                );
+            }
+        }
+    }
 
     let mut ctx = ProjectContext::new(&root);
     ctx.rust_files = files.rust;
     ctx.markdown_files = files.markdown;
     ctx.yaml_files = files.yaml;
+    ctx.makefile_files = files.makefiles;
 
     for rs in &ctx.rust_files {
         match RustParser::parse(rs) {
@@ -50,18 +108,53 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
     }
 
-    let analyzers: Vec<Box<dyn DriftAnalyzer>> = vec![Box::new(DocsAnalyzer::default())];
-    let divergences = spec_drift::run(&ctx, &analyzers);
+    let analyzers = select_analyzers(&cli);
+    let mut divergences = spec_drift::run(&ctx, &analyzers);
+    divergences = spec_drift::apply_config(divergences, &config, &root);
 
-    let rendered = match cli.format.as_str() {
-        "json" => JsonReporter.render(&divergences),
-        _ => HumanReporter.render(&divergences),
+    let rendered = if cli.fix_prompt {
+        FixPromptReporter.render(&divergences)
+    } else {
+        match cli.format.as_str() {
+            "json" => JsonReporter.render(&divergences),
+            "sarif" => SarifReporter.render(&divergences),
+            _ => HumanReporter.render(&divergences),
+        }
     };
     print!("{rendered}");
 
-    if divergences.is_empty() {
-        Ok(ExitCode::SUCCESS)
-    } else {
+    let threshold = parse_severity(&cli.deny);
+    let has_blocking = divergences.iter().any(|d| d.severity >= threshold);
+    if has_blocking {
         Ok(ExitCode::from(1))
+    } else {
+        Ok(ExitCode::SUCCESS)
     }
+}
+
+fn parse_severity(s: &str) -> Severity {
+    match s {
+        "critical" => Severity::Critical,
+        "warning" => Severity::Warning,
+        _ => Severity::Notice,
+    }
+}
+
+fn select_analyzers(cli: &Cli) -> Vec<Box<dyn DriftAnalyzer>> {
+    let any_specific = cli.docs || cli.examples || cli.tests || cli.ci;
+
+    let mut v: Vec<Box<dyn DriftAnalyzer>> = Vec::new();
+    if !any_specific || cli.docs {
+        v.push(Box::new(DocsAnalyzer::default()));
+    }
+    if !any_specific || cli.examples {
+        v.push(Box::new(ExamplesAnalyzer::default()));
+    }
+    if !any_specific || cli.tests {
+        v.push(Box::new(TestsAnalyzer));
+    }
+    if !any_specific || cli.ci {
+        v.push(Box::new(CiAnalyzer::default()));
+    }
+    v
 }

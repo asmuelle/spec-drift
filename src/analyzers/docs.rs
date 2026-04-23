@@ -18,7 +18,7 @@ impl Default for DocsAnalyzer {
     fn default() -> Self {
         Self {
             ident_re: Regex::new(
-                r"^([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(?:\(\))?$",
+                r"^([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(\(\))?$",
             )
             .expect("static regex"),
         }
@@ -71,19 +71,45 @@ impl DriftAnalyzer for DocsAnalyzer {
 }
 
 impl DocsAnalyzer {
+    /// Extract a Rust-shaped symbol reference from a Markdown inline code span.
+    ///
+    /// Returns `Some(symbol)` only when the span is clearly a Rust symbol:
+    /// - ends in `()` (a function/method call), OR
+    /// - contains a `::` path (qualified path), OR
+    /// - starts with an uppercase letter (type name).
+    ///
+    /// Bare lowercase words like `ignore`, `syn`, `HEAD` are ignored to avoid
+    /// flagging ordinary English prose, crate names, filenames, and tool names
+    /// that happen to be code-fenced.
     fn extract_symbol(&self, claim: &SpecClaim) -> Option<String> {
-        let caps = self.ident_re.captures(claim.text.trim())?;
-        Some(caps.get(1)?.as_str().to_string())
+        let text = claim.text.trim();
+        let caps = self.ident_re.captures(text)?;
+        let symbol = caps.get(1)?.as_str().to_string();
+        let has_call_parens = caps.get(2).is_some();
+        let has_path_sep = symbol.contains("::");
+        // A type-looking name is CamelCase: starts uppercase AND contains at
+        // least one lowercase letter. This rejects all-caps words like
+        // `README`, `HEAD`, `AGENTS` that are common in English prose but
+        // aren't Rust type names.
+        let looks_like_type = symbol.starts_with(|c: char| c.is_ascii_uppercase())
+            && symbol.chars().any(|c| c.is_ascii_lowercase());
+
+        if has_call_parens || has_path_sep || looks_like_type {
+            Some(symbol)
+        } else {
+            None
+        }
     }
 }
 
 /// A small stop-list of identifiers that Rust docs commonly reference but that
 /// `spec-drift` cannot resolve against a project-local AST (primitive types,
-/// `std` items, etc.). This is a heuristic — users can disable it via config
-/// once the rule engine lands.
+/// `std` items, common tool names and filenames). This is a heuristic — users
+/// can extend or disable it via config once the rule engine lands.
 fn is_language_intrinsic(name: &str) -> bool {
     matches!(
         name,
+        // Primitives and keywords
         "bool"
             | "char"
             | "str"
@@ -132,6 +158,13 @@ fn is_language_intrinsic(name: &str) -> bool {
             | "Self"
             | "super"
             | "crate"
+            // Common tool / config filenames that appear CamelCased in prose
+            | "Makefile"
+            | "GNUmakefile"
+            | "Dockerfile"
+            | "Cargo"
+            | "Cargo.toml"
+            | "Cargo.lock"
     )
 }
 
@@ -187,6 +220,31 @@ mod tests {
         ctx.markdown_files.push(md);
 
         // No code facts — but Option/String are intrinsics so must not flag.
+        assert!(DocsAnalyzer::default().analyze(&ctx).is_empty());
+    }
+
+    #[test]
+    fn ignores_bare_lowercase_words() {
+        // Words like `ignore`, `syn`, `git2` in backticks are usually crate
+        // names or prose, not API references. They must not generate drift.
+        let tmp = tempfile::tempdir().unwrap();
+        let md = tmp.path().join("README.md");
+        std::fs::write(&md, "Uses the `ignore` crate and `syn` for parsing.\n").unwrap();
+
+        let mut ctx = ProjectContext::new(tmp.path());
+        ctx.markdown_files.push(md);
+        assert!(DocsAnalyzer::default().analyze(&ctx).is_empty());
+    }
+
+    #[test]
+    fn ignores_all_caps_words() {
+        // `README`, `HEAD`, `AGENTS` look uppercase but aren't Rust type names.
+        let tmp = tempfile::tempdir().unwrap();
+        let md = tmp.path().join("README.md");
+        std::fs::write(&md, "See `README` and `HEAD` and `AGENTS`.\n").unwrap();
+
+        let mut ctx = ProjectContext::new(tmp.path());
+        ctx.markdown_files.push(md);
         assert!(DocsAnalyzer::default().analyze(&ctx).is_empty());
     }
 

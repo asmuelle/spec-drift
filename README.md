@@ -1,6 +1,10 @@
 # 🛠️ Specification: `spec-drift`
 **Subtitle:** *Semantic Coherence Analysis between Specification and Implementation*
 
+[![Rust CI](https://github.com/asmuelle/spec-drift/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/asmuelle/spec-drift/actions/workflows/rust.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Rust edition](https://img.shields.io/badge/rust-2024%20%7C%201.95%2B-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
+
 ## 1. Core Philosophy
 `spec-drift` operates on the principle of **Single Source of Truth (SSOT) Verification**. It treats documentation, examples, and CI configs as "executable specifications." When the code changes, the specification must evolve, or it becomes a "lie."
 

@@ -6,6 +6,7 @@
 //! CLI wrapper over [`run`].
 
 pub mod analyzers;
+pub mod config;
 pub mod context;
 pub mod domain;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod parsers;
 pub mod reporters;
 pub mod sources;
 
+pub use config::Config;
 pub use context::ProjectContext;
 pub use domain::{
     ClaimKind, CodeFact, Divergence, FactKind, Location, RuleId, Severity, SpecClaim,
@@ -34,4 +36,16 @@ pub fn run(ctx: &ProjectContext, analyzers: &[Box<dyn DriftAnalyzer>]) -> Vec<Di
             .then_with(|| a.rule.as_str().cmp(b.rule.as_str()))
     });
     all
+}
+
+/// Apply a [`Config`] to a divergence set: drop suppressed items and apply
+/// severity overrides.
+pub fn apply_config(
+    mut divs: Vec<Divergence>,
+    cfg: &Config,
+    root: &std::path::Path,
+) -> Vec<Divergence> {
+    divs.retain(|d| !cfg.is_suppressed(d, root));
+    cfg.apply_severity_overrides(&mut divs);
+    divs
 }
