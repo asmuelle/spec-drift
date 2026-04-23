@@ -73,6 +73,12 @@ impl DriftAnalyzer for ExamplesAnalyzer {
 /// Abstraction over invoking cargo so tests can inject canned JSON streams.
 pub trait CargoRunner: Send + Sync {
     fn check_examples(&self, manifest_dir: &std::path::Path) -> std::io::Result<String>;
+    /// Clippy output for examples. Used by DeprecatedUsageAnalyzer.
+    /// Default implementation returns empty output so runners that only care
+    /// about `cargo check` don't have to stub a second method.
+    fn clippy_examples(&self, _manifest_dir: &std::path::Path) -> std::io::Result<String> {
+        Ok(String::new())
+    }
 }
 
 pub struct RealCargoRunner;
@@ -89,6 +95,19 @@ impl CargoRunner for RealCargoRunner {
             ])
             .output()?;
         // cargo returns non-zero on compile error — we still want the stdout stream.
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    fn clippy_examples(&self, manifest_dir: &std::path::Path) -> std::io::Result<String> {
+        let out = Command::new("cargo")
+            .current_dir(manifest_dir)
+            .args([
+                "clippy",
+                "--examples",
+                "--message-format=json",
+                "--quiet",
+            ])
+            .output()?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 }

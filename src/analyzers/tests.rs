@@ -113,11 +113,16 @@ fn intent_is_negative(name: &str) -> bool {
         "identifies_",
         "catches_",
         "warns_",
+        "does_not_",
+        "doesnt_",
     ];
     if DETECTION_PREFIXES.iter().any(|p| n.starts_with(p)) {
         return false;
     }
 
+    // Note: "missing" is intentionally omitted — too ambiguous in names like
+    // `missing_file_is_not_an_error` where it describes the input, not the
+    // expected outcome. `rejects_missing_field` is still caught via "rejects".
     const NEGATIVE_HINTS: &[&str] = &[
         "cannot",
         "rejects",
@@ -128,7 +133,6 @@ fn intent_is_negative(name: &str) -> bool {
         "returns_err",
         "fails",
         "invalid",
-        "missing",
         "not_allowed",
         "panics",
     ];

@@ -6,6 +6,7 @@
 //! CLI wrapper over [`run`].
 
 pub mod analyzers;
+pub mod baseline;
 pub mod config;
 pub mod context;
 pub mod domain;
@@ -13,6 +14,7 @@ pub mod error;
 pub mod parsers;
 pub mod reporters;
 pub mod sources;
+pub mod suppress;
 
 pub use config::Config;
 pub use context::ProjectContext;

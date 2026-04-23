@@ -21,4 +21,7 @@ pub enum SpecDriftError {
 
     #[error("invalid config at {path}: {message}")]
     Config { path: PathBuf, message: String },
+
+    #[error("baseline error at {path}: {message}")]
+    Baseline { path: PathBuf, message: String },
 }

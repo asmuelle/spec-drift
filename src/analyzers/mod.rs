@@ -1,4 +1,7 @@
 pub mod ci;
+pub mod constraint;
+pub mod coverage;
+pub mod deprecated;
 pub mod docs;
 pub mod examples;
 pub mod tests;
@@ -17,6 +20,9 @@ pub trait DriftAnalyzer {
 }
 
 pub use ci::{CargoMetadata, CiAnalyzer};
+pub use constraint::ConstraintAnalyzer;
+pub use coverage::MissingCoverageAnalyzer;
+pub use deprecated::DeprecatedUsageAnalyzer;
 pub use docs::DocsAnalyzer;
 pub use examples::{CargoRunner, ExamplesAnalyzer};
 pub use tests::TestsAnalyzer;

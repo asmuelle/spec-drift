@@ -1,13 +1,18 @@
 use clap::Parser;
 use spec_drift::analyzers::{
-    CiAnalyzer, DocsAnalyzer, DriftAnalyzer, ExamplesAnalyzer, TestsAnalyzer,
+    CiAnalyzer, ConstraintAnalyzer, DeprecatedUsageAnalyzer, DocsAnalyzer, DriftAnalyzer,
+    ExamplesAnalyzer, MissingCoverageAnalyzer, TestsAnalyzer,
 };
+use spec_drift::baseline;
 use spec_drift::config::Config;
 use spec_drift::context::ProjectContext;
 use spec_drift::domain::Severity;
 use spec_drift::parsers::RustParser;
-use spec_drift::reporters::{FixPromptReporter, HumanReporter, JsonReporter, Reporter, SarifReporter};
+use spec_drift::reporters::{
+    FixPromptReporter, HumanReporter, JsonReporter, Reporter, SarifReporter,
+};
 use spec_drift::sources::{FsWalker, GitHistory};
+use spec_drift::suppress;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -33,6 +38,10 @@ struct Cli {
     /// Path to `spec-drift.toml`. Defaults to walking up from `--root`.
     #[arg(long)]
     config: Option<PathBuf>,
+
+    /// Baseline JSON file. Divergences present in the baseline are not re-reported.
+    #[arg(long)]
+    baseline: Option<PathBuf>,
 
     /// Only analyze files changed since this git ref (e.g. `HEAD`, `origin/main`).
     #[arg(long)]
@@ -108,9 +117,15 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
     }
 
-    let analyzers = select_analyzers(&cli);
+    let analyzers = select_analyzers(&cli, &config);
     let mut divergences = spec_drift::run(&ctx, &analyzers);
     divergences = spec_drift::apply_config(divergences, &config, &root);
+    divergences = suppress::apply_inline_ignores(divergences);
+
+    if let Some(baseline_path) = cli.baseline.as_ref() {
+        let baseline = baseline::load(baseline_path)?;
+        divergences = baseline::subtract(divergences, &baseline);
+    }
 
     let rendered = if cli.fix_prompt {
         FixPromptReporter.render(&divergences)
@@ -140,15 +155,22 @@ fn parse_severity(s: &str) -> Severity {
     }
 }
 
-fn select_analyzers(cli: &Cli) -> Vec<Box<dyn DriftAnalyzer>> {
+fn select_analyzers(cli: &Cli, config: &Config) -> Vec<Box<dyn DriftAnalyzer>> {
     let any_specific = cli.docs || cli.examples || cli.tests || cli.ci;
 
     let mut v: Vec<Box<dyn DriftAnalyzer>> = Vec::new();
     if !any_specific || cli.docs {
         v.push(Box::new(DocsAnalyzer::default()));
+        v.push(Box::new(MissingCoverageAnalyzer));
+        if !config.constraint_rules.is_empty() {
+            v.push(Box::new(ConstraintAnalyzer::new(
+                config.constraint_rules.clone(),
+            )));
+        }
     }
     if !any_specific || cli.examples {
         v.push(Box::new(ExamplesAnalyzer::default()));
+        v.push(Box::new(DeprecatedUsageAnalyzer::default()));
     }
     if !any_specific || cli.tests {
         v.push(Box::new(TestsAnalyzer));

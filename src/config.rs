@@ -10,10 +10,18 @@
 
 use crate::domain::{Divergence, RuleId, Severity};
 use crate::error::SpecDriftError;
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// A user-declared structural constraint applied by `ConstraintAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct ConstraintRule {
+    pub name: String,
+    pub glob: GlobMatcher,
+    pub return_type: Option<String>,
+}
 
 /// Parsed `spec-drift.toml`.
 #[derive(Debug, Default, Clone)]
@@ -22,6 +30,7 @@ pub struct Config {
     pub ignored_rules: Vec<RuleId>,
     pub ignored_paths: GlobSet,
     pub ignored_symbols: GlobSet,
+    pub constraint_rules: Vec<ConstraintRule>,
 }
 
 impl Config {
@@ -112,6 +121,8 @@ struct ConfigFile {
     severity: HashMap<String, String>,
     #[serde(default)]
     ignore: IgnoreBlock,
+    #[serde(default)]
+    rules: RulesBlock,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -123,6 +134,22 @@ struct IgnoreBlock {
     paths: Vec<String>,
     #[serde(default)]
     symbols: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RulesBlock {
+    #[serde(default)]
+    constraint_violation: Vec<RawConstraintRule>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConstraintRule {
+    name: String,
+    glob: String,
+    #[serde(default)]
+    return_type: Option<String>,
 }
 
 impl ConfigFile {
@@ -149,11 +176,30 @@ impl ConfigFile {
             ignored_rules.push(rule);
         }
 
+        let mut constraint_rules = Vec::new();
+        for raw in self.rules.constraint_violation {
+            let glob = Glob::new(&raw.glob)
+                .map_err(|e| SpecDriftError::Config {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "invalid glob in [[rules.constraint_violation]] `{}`: {e}",
+                        raw.name
+                    ),
+                })?
+                .compile_matcher();
+            constraint_rules.push(ConstraintRule {
+                name: raw.name,
+                glob,
+                return_type: raw.return_type,
+            });
+        }
+
         Ok(Config {
             severities,
             ignored_rules,
             ignored_paths: build_globset(&self.ignore.paths, path, "paths")?,
             ignored_symbols: build_globset(&self.ignore.symbols, path, "symbols")?,
+            constraint_rules,
         })
     }
 }

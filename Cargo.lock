@@ -504,6 +504,7 @@ dependencies = [
  "ignore",
  "proc-macro2",
  "pulldown-cmark",
+ "quote",
  "regex",
  "serde",
  "serde_json",

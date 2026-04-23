@@ -25,6 +25,7 @@ globset = "0.4"
 ignore = "0.4"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 pulldown-cmark = "0.12"
+quote = "1"
 regex = "1.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
