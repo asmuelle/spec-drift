@@ -5,6 +5,8 @@ pub mod deprecated;
 pub mod docs;
 pub mod env;
 pub mod examples;
+pub mod logic_gap;
+pub mod outdated_logic;
 pub mod tests;
 
 use crate::context::ProjectContext;
@@ -27,4 +29,6 @@ pub use deprecated::DeprecatedUsageAnalyzer;
 pub use docs::DocsAnalyzer;
 pub use env::EnvMismatchAnalyzer;
 pub use examples::{CargoRunner, ExamplesAnalyzer};
+pub use logic_gap::LogicGapAnalyzer;
+pub use outdated_logic::OutdatedLogicAnalyzer;
 pub use tests::TestsAnalyzer;

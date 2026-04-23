@@ -11,6 +11,7 @@ pub mod config;
 pub mod context;
 pub mod domain;
 pub mod error;
+pub mod llm;
 pub mod parsers;
 pub mod reporters;
 pub mod sources;

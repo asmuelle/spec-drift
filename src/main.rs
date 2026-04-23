@@ -1,7 +1,8 @@
 use clap::Parser;
 use spec_drift::analyzers::{
     CiAnalyzer, ConstraintAnalyzer, DeprecatedUsageAnalyzer, DocsAnalyzer, DriftAnalyzer,
-    EnvMismatchAnalyzer, ExamplesAnalyzer, MissingCoverageAnalyzer, TestsAnalyzer,
+    EnvMismatchAnalyzer, ExamplesAnalyzer, LogicGapAnalyzer, MissingCoverageAnalyzer,
+    OutdatedLogicAnalyzer, TestsAnalyzer,
 };
 use spec_drift::baseline;
 use spec_drift::config::Config;
@@ -70,6 +71,10 @@ struct Cli {
     /// Promote every non-deterministic rule by one severity level.
     #[arg(long)]
     strict: bool,
+
+    /// Disable every LLM-backed rule, regardless of `[llm]` config.
+    #[arg(long)]
+    no_llm: bool,
 }
 
 fn main() -> ExitCode {
@@ -166,6 +171,9 @@ fn parse_severity(s: &str) -> Severity {
 fn select_analyzers(cli: &Cli, config: &Config) -> Vec<Box<dyn DriftAnalyzer>> {
     let any_specific = cli.docs || cli.examples || cli.tests || cli.ci;
 
+    // Build the LLM client once and share it. `--no-llm` wins over config.
+    let llm_client = spec_drift::llm::build_client(&config.llm, cli.no_llm);
+
     let mut v: Vec<Box<dyn DriftAnalyzer>> = Vec::new();
     if !any_specific || cli.docs {
         v.push(Box::new(DocsAnalyzer::default()));
@@ -175,10 +183,12 @@ fn select_analyzers(cli: &Cli, config: &Config) -> Vec<Box<dyn DriftAnalyzer>> {
                 config.constraint_rules.clone(),
             )));
         }
+        v.push(Box::new(OutdatedLogicAnalyzer::new(llm_client.clone())));
     }
     if !any_specific || cli.examples {
         v.push(Box::new(ExamplesAnalyzer::default()));
         v.push(Box::new(DeprecatedUsageAnalyzer::default()));
+        v.push(Box::new(LogicGapAnalyzer::new(llm_client.clone())));
     }
     if !any_specific || cli.tests {
         v.push(Box::new(TestsAnalyzer));

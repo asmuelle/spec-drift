@@ -31,6 +31,36 @@ pub struct Config {
     pub ignored_paths: GlobSet,
     pub ignored_symbols: GlobSet,
     pub constraint_rules: Vec<ConstraintRule>,
+    pub llm: LlmConfig,
+}
+
+/// `[llm]` block — always off by default. `--no-llm` on the CLI wins unconditionally.
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    pub enabled: bool,
+    pub provider: LlmProvider,
+    pub model: String,
+    pub max_calls: u32,
+    pub timeout_s: u32,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: LlmProvider::Anthropic,
+            model: "claude-sonnet-4-6".to_string(),
+            max_calls: 50,
+            timeout_s: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmProvider {
+    Anthropic,
+    OpenAi,
+    Local,
 }
 
 impl Config {
@@ -123,6 +153,23 @@ struct ConfigFile {
     ignore: IgnoreBlock,
     #[serde(default)]
     rules: RulesBlock,
+    #[serde(default)]
+    llm: Option<RawLlmConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLlmConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    max_calls: Option<u32>,
+    #[serde(default)]
+    timeout_s: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -194,12 +241,37 @@ impl ConfigFile {
             });
         }
 
+        let llm = match self.llm {
+            Some(raw) => {
+                let provider = match raw.provider.as_deref() {
+                    None | Some("anthropic") => LlmProvider::Anthropic,
+                    Some("openai") => LlmProvider::OpenAi,
+                    Some("local") => LlmProvider::Local,
+                    Some(other) => {
+                        return Err(SpecDriftError::Config {
+                            path: path.to_path_buf(),
+                            message: format!("unknown [llm].provider: `{other}`"),
+                        });
+                    }
+                };
+                LlmConfig {
+                    enabled: raw.enabled,
+                    provider,
+                    model: raw.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
+                    max_calls: raw.max_calls.unwrap_or(50),
+                    timeout_s: raw.timeout_s.unwrap_or(30),
+                }
+            }
+            None => LlmConfig::default(),
+        };
+
         Ok(Config {
             severities,
             ignored_rules,
             ignored_paths: build_globset(&self.ignore.paths, path, "paths")?,
             ignored_symbols: build_globset(&self.ignore.symbols, path, "symbols")?,
             constraint_rules,
+            llm,
         })
     }
 }
@@ -354,6 +426,47 @@ mod tests {
         let mut divs = vec![make_div(RuleId::SymbolAbsence, "/root/a.md")];
         cfg.apply_severity_overrides(&mut divs);
         assert_eq!(divs[0].severity, Severity::Notice);
+    }
+
+    #[test]
+    fn llm_defaults_when_block_absent() {
+        let (_tmp, path) = write_config("");
+        let cfg = Config::load(&path).unwrap();
+        assert!(!cfg.llm.enabled);
+        assert_eq!(cfg.llm.provider, LlmProvider::Anthropic);
+        assert_eq!(cfg.llm.max_calls, 50);
+    }
+
+    #[test]
+    fn llm_block_parses_all_fields() {
+        let (_tmp, path) = write_config(
+            r#"
+            [llm]
+            enabled = true
+            provider = "openai"
+            model = "gpt-5"
+            max_calls = 10
+            timeout_s = 15
+        "#,
+        );
+        let cfg = Config::load(&path).unwrap();
+        assert!(cfg.llm.enabled);
+        assert_eq!(cfg.llm.provider, LlmProvider::OpenAi);
+        assert_eq!(cfg.llm.model, "gpt-5");
+        assert_eq!(cfg.llm.max_calls, 10);
+        assert_eq!(cfg.llm.timeout_s, 15);
+    }
+
+    #[test]
+    fn llm_rejects_unknown_provider() {
+        let (_tmp, path) = write_config(
+            r#"
+            [llm]
+            enabled = true
+            provider = "invented-corp"
+        "#,
+        );
+        assert!(Config::load(&path).is_err());
     }
 
     #[test]
