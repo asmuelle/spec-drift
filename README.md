@@ -162,23 +162,67 @@ spec-drift --format sarif --deny warning --baseline .spec-drift.baseline.json
 ```text
 📉 SPEC DRIFT REPORT: [3 Divergences Found]
 
-❌ CRITICAL: Documentation Drift
+❌ CRITICAL: symbol_absence
 - File: README.md (Line 42)
-- Stated: "Use `Client::new()` to initialize the connection."
-- Reality: `Client::new()` was replaced by `Client::builder().build()`.
-- Risk: New developers and AI agents will use deprecated/non-existent APIs.
+- Stated: `Client::new` exists in the codebase
+- Reality: no symbol named `new` found in the parsed Rust sources
+- Risk: New developers and AI agents will reach for a non-existent API.
+- Blame: abc1234 Ada Lovelace (2024-01-02): Initial README
 
-⚠️ WARNING: Agent Instruction Drift
-- File: AGENTS.md (Line 12)
-- Stated: "Always use `tokio::sync::Mutex` for shared state."
-- Reality: Found 3 instances of `std::sync::Mutex` in `src/state.rs`.
-- Risk: AI will be confused by conflicting patterns.
+⚠️  WARNING: ghost_command
+- File: .github/workflows/ci.yml (Line 14)
+- Stated: CI runs `cargo` against package `legacy_crate`
+- Reality: `legacy_crate` is not a member of the workspace
+- Risk: CI exercises a target that no longer exists; the step is a no-op at best.
 
-🟡 NOTICE: Example Drift
-- File: examples/basic_usage.rs
-- Status: Fails to compile.
-- Error: Mismatched types in `send_request` call.
+🟡 NOTICE: missing_coverage
+- File: README.md (Line 8)
+- Stated: `place_order` is a capability the project exposes
+- Reality: no test references `place_order` by name
+- Risk: Capability claimed in the docs has no guard-rail in tests.
 ```
+
+---
+
+## GitHub Action
+
+Run `spec-drift` in CI and publish results to GitHub code scanning:
+
+```yaml
+name: spec-drift
+on: [push, pull_request]
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }  # --blame needs full history
+      - uses: asmuelle/spec-drift@main
+        with:
+          format: sarif
+          output: spec-drift.sarif
+          args: --blame --deny warning
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: spec-drift.sarif
+          category: spec-drift
+```
+
+### Action inputs
+
+| Input                | Default  | Purpose                                                                |
+|----------------------|----------|------------------------------------------------------------------------|
+| `version`            | `main`   | git ref (branch, tag, or SHA) to install.                              |
+| `format`             | `human`  | Output format: `human`, `json`, or `sarif`.                            |
+| `output`             | *(stdout)* | File path to write output to.                                         |
+| `deny`               | `notice` | Fail the step when divergences at or above this severity exist.        |
+| `args`               | *(empty)* | Extra arguments forwarded to `spec-drift` (e.g. `--blame --strict`). |
+| `working-directory`  | `.`      | Directory the scan runs in.                                            |
+| `anthropic-api-key`  | *(empty)* | Enables LLM-backed rules when combined with `[llm] enabled = true`. |
 
 ---
 

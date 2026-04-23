@@ -1,0 +1,68 @@
+name: 'spec-drift'
+description: 'Semantic coherence analysis between specification and Rust implementation'
+author: 'spec-drift contributors'
+branding:
+  icon: 'file-text'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'spec-drift git ref (branch, tag, or commit SHA)'
+    required: false
+    default: 'main'
+  format:
+    description: 'Output format: human, json, or sarif'
+    required: false
+    default: 'human'
+  output:
+    description: 'Write output to this path (stdout if empty)'
+    required: false
+    default: ''
+  deny:
+    description: 'Fail when any divergence at or above this severity exists: notice | warning | critical'
+    required: false
+    default: 'notice'
+  args:
+    description: 'Additional arguments forwarded to spec-drift'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Working directory for the scan'
+    required: false
+    default: '.'
+  anthropic-api-key:
+    description: 'Anthropic API key for LLM-backed rules. Omit to run without LLM.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache spec-drift binary
+      id: cache-spec-drift
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/spec-drift
+        key: spec-drift-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install spec-drift
+      if: steps.cache-spec-drift.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        cargo install --git https://github.com/asmuelle/spec-drift --branch "${{ inputs.version }}" --locked
+
+    - name: Run spec-drift
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        set -o pipefail
+        ARGS="--format ${{ inputs.format }} --deny ${{ inputs.deny }} ${{ inputs.args }}"
+        if [ -n "${{ inputs.output }}" ]; then
+          # shellcheck disable=SC2086
+          spec-drift $ARGS > "${{ inputs.output }}"
+        else
+          # shellcheck disable=SC2086
+          spec-drift $ARGS
+        fi
