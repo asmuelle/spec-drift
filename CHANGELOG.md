@@ -99,9 +99,10 @@ block parses.
   pre-built release binary when available, `cargo install --git` fallback).
 - `.github/workflows/rust.yml` self-check job uploads SARIF to GitHub code
   scanning on every push/PR.
-- `.github/workflows/release.yml` builds Linux x86_64, macOS arm64, and
-  macOS x86_64 binaries on tagged releases. Publishes to crates.io when
-  `CARGO_REGISTRY_TOKEN` is set in repo secrets.
+- `.github/workflows/release.yml` builds Linux x86_64 and macOS arm64
+  binaries on tagged releases. Publishes to crates.io when
+  `CARGO_REGISTRY_TOKEN` is set in repo secrets. Intel-Mac users fall
+  back to the `cargo install` path in `action.yml`.
 
 [Unreleased]: https://github.com/asmuelle/spec-drift/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/asmuelle/spec-drift/releases/tag/v0.1.0

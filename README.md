@@ -1,5 +1,5 @@
-# 🛠️ Specification: `spec-drift`
-**Subtitle:** *Semantic Coherence Analysis between Specification and Implementation*
+# spec-drift
+*Semantic Coherence Analysis between Specification and Implementation*
 
 [![Rust CI](https://github.com/asmuelle/spec-drift/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/asmuelle/spec-drift/actions/workflows/rust.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)

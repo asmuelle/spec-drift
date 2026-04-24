@@ -21,8 +21,10 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-13
+          # Intel-Mac (`x86_64-apple-darwin`) pre-built binaries are not shipped:
+          # GitHub-hosted `macos-13` runners have multi-hour queues on free tier
+          # and Intel macOS is EOL. Intel Mac users fall back to `cargo install`
+          # via action.yml.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
