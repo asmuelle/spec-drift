@@ -17,6 +17,7 @@ pub mod parsers;
 pub mod reporters;
 pub mod sources;
 pub mod suppress;
+pub mod workspace;
 
 pub use config::Config;
 pub use context::ProjectContext;

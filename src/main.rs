@@ -14,6 +14,7 @@ use spec_drift::reporters::{
 };
 use spec_drift::sources::{FsWalker, GitHistory};
 use spec_drift::suppress;
+use spec_drift::workspace;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -47,6 +48,10 @@ struct Cli {
     /// Only analyze files changed since this git ref (e.g. `HEAD`, `origin/main`).
     #[arg(long)]
     diff: Option<String>,
+
+    /// In a cargo workspace, restrict analysis to the named member.
+    #[arg(long)]
+    package: Option<String>,
 
     /// Run only the docs pillar.
     #[arg(long, conflicts_with_all = ["examples", "tests", "ci"])]
@@ -116,6 +121,15 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 );
             }
         }
+    }
+
+    if let Some(name) = cli.package.as_deref() {
+        let packages = workspace::load(&root);
+        let pkg = workspace::find(&packages, name).map_err(anyhow::Error::msg)?;
+        files.rust = workspace::narrow_paths(files.rust, pkg);
+        files.markdown = workspace::narrow_paths(files.markdown, pkg);
+        files.yaml = workspace::narrow_paths(files.yaml, pkg);
+        files.makefiles = workspace::narrow_paths(files.makefiles, pkg);
     }
 
     let mut ctx = ProjectContext::new(&root);

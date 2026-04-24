@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: 'spec-drift git ref (branch, tag, or commit SHA)'
+    description: 'spec-drift ref. Accepts a tag (`v0.1.0`) for pre-built binaries, or a branch/SHA to build from source.'
     required: false
-    default: 'main'
+    default: 'v0.1.0'
   format:
     description: 'Output format: human, json, or sarif'
     required: false
@@ -45,17 +45,60 @@ runs:
         path: ~/.cargo/bin/spec-drift
         key: spec-drift-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
-    - name: Install Rust toolchain
+    - name: Download pre-built binary
+      id: download
       if: steps.cache-spec-drift.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Only tagged versions have pre-built binaries.
+        case "${{ inputs.version }}" in
+          v*.*.*) ;;
+          *)
+            echo "version `${{ inputs.version }}` is not a semver tag; skipping binary download"
+            echo "downloaded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          ;;
+        esac
+
+        case "${{ runner.os }}-${{ runner.arch }}" in
+          Linux-X64)   TARGET=x86_64-unknown-linux-gnu ;;
+          macOS-ARM64) TARGET=aarch64-apple-darwin ;;
+          macOS-X64)   TARGET=x86_64-apple-darwin ;;
+          *)
+            echo "no pre-built binary for ${{ runner.os }}-${{ runner.arch }}; will fall back to source install"
+            echo "downloaded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          ;;
+        esac
+
+        URL="https://github.com/asmuelle/spec-drift/releases/download/${{ inputs.version }}/spec-drift-${TARGET}.tar.gz"
+        echo "Fetching ${URL}"
+        if curl -sfL -o /tmp/spec-drift.tar.gz "$URL"; then
+          mkdir -p "$HOME/.cargo/bin"
+          tar -xzf /tmp/spec-drift.tar.gz -C "$HOME/.cargo/bin"
+          chmod +x "$HOME/.cargo/bin/spec-drift"
+          echo "downloaded=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "release asset not found; falling back to source install"
+          echo "downloaded=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install Rust toolchain (fallback)
+      if: steps.cache-spec-drift.outputs.cache-hit != 'true' && steps.download.outputs.downloaded != 'true'
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: "1.95"
 
-    - name: Install spec-drift
-      if: steps.cache-spec-drift.outputs.cache-hit != 'true'
+    - name: Install spec-drift from source (fallback)
+      if: steps.cache-spec-drift.outputs.cache-hit != 'true' && steps.download.outputs.downloaded != 'true'
       shell: bash
       run: |
         cargo install --git https://github.com/asmuelle/spec-drift --branch "${{ inputs.version }}" --locked
+
+    - name: Add cargo bin to PATH
+      shell: bash
+      run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
     - name: Run spec-drift
       shell: bash
