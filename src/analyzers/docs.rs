@@ -17,26 +17,23 @@ pub struct DocsAnalyzer {
 impl Default for DocsAnalyzer {
     fn default() -> Self {
         Self {
-            ident_re: Regex::new(
-                r"^([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(\(\))?$",
-            )
-            .expect("static regex"),
+            ident_re: Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(\(\))?$")
+                .expect("static regex"),
         }
     }
 }
 
 impl DriftAnalyzer for DocsAnalyzer {
-    fn id(&self) -> &'static str {
-        "docs"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let mut out = Vec::new();
 
         for md in &ctx.markdown_files {
             let claims = match MarkdownParser::parse(md) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (docs): {e}", md.display());
+                    continue;
+                }
             };
 
             for claim in claims {
@@ -62,7 +59,6 @@ impl DriftAnalyzer for DocsAnalyzer {
                         risk: "New developers and AI agents will reach for a non-existent API."
                             .to_string(),
                         attribution: None,
-
                     });
                 }
             }

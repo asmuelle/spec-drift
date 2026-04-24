@@ -16,10 +16,6 @@ use std::path::Path;
 pub struct TestsAnalyzer;
 
 impl DriftAnalyzer for TestsAnalyzer {
-    fn id(&self) -> &'static str {
-        "tests"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let mut out = Vec::new();
         for rs in &ctx.rust_files {
@@ -94,7 +90,6 @@ fn inspect_test(f: &syn::ItemFn, path: &Path, out: &mut Vec<Divergence>) {
             reality: format!("`{name}` {reason}"),
             risk: "The test is green but proves nothing about the stated contract.".to_string(),
             attribution: None,
-
         });
     }
 }
@@ -196,7 +191,13 @@ fn handle_macro(mac: &syn::Macro, count: &mut usize, has_neg: &mut bool) {
 
     let is_assertion = matches!(
         name.as_str(),
-        "assert" | "assert_eq" | "assert_ne" | "debug_assert" | "debug_assert_eq" | "debug_assert_ne" | "panic"
+        "assert"
+            | "assert_eq"
+            | "assert_ne"
+            | "debug_assert"
+            | "debug_assert_eq"
+            | "debug_assert_ne"
+            | "panic"
     );
     if !is_assertion {
         return;

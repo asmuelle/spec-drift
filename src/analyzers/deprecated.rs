@@ -1,5 +1,5 @@
-use super::DriftAnalyzer;
 use super::examples::{CargoRunner, RealCargoRunner};
+use super::DriftAnalyzer;
 use crate::context::ProjectContext;
 use crate::domain::{Divergence, Location, RuleId, Severity};
 use serde::Deserialize;
@@ -30,10 +30,6 @@ impl DeprecatedUsageAnalyzer {
 }
 
 impl DriftAnalyzer for DeprecatedUsageAnalyzer {
-    fn id(&self) -> &'static str {
-        "deprecated_usage"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let examples_dir = ctx.root.join("examples");
         if !examples_dir.exists() {
@@ -134,7 +130,6 @@ fn parse_clippy_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence
             reality: format!("example uses deprecated API: {}", message.message),
             risk: "Examples teach users a pattern the codebase is retiring.".to_string(),
             attribution: None,
-
         });
     }
 

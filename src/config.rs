@@ -63,12 +63,27 @@ pub enum LlmProvider {
     Local,
 }
 
+/// Whether a config path was user-specified or auto-discovered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSource {
+    Explicit,
+    Discovered,
+}
+
 impl Config {
-    /// Load a config from `path`. Returns `Config::default()` if the file does
-    /// not exist — a missing config is not an error.
-    pub fn load(path: &Path) -> Result<Self, SpecDriftError> {
+    /// Load a config from `path`. When `source` is [`ConfigSource::Discovered`],
+    /// a missing file silently returns the default config. When `Explicit`, a
+    /// missing file is an error — the user asked for a specific config that
+    /// doesn't exist.
+    pub fn load(path: &Path, source: ConfigSource) -> Result<Self, SpecDriftError> {
         if !path.exists() {
-            return Ok(Self::default());
+            return match source {
+                ConfigSource::Discovered => Ok(Self::default()),
+                ConfigSource::Explicit => Err(SpecDriftError::Config {
+                    path: path.to_path_buf(),
+                    message: "file not found".into(),
+                }),
+            };
         }
         let raw = std::fs::read_to_string(path).map_err(|e| SpecDriftError::Io {
             path: path.to_path_buf(),
@@ -342,11 +357,17 @@ mod tests {
     }
 
     #[test]
-    fn absent_config_loads_as_default() {
+    fn absent_config_loads_as_default_when_discovered() {
         let tmp = tempfile::tempdir().unwrap();
-        let cfg = Config::load(&tmp.path().join("nope.toml")).unwrap();
+        let cfg = Config::load(&tmp.path().join("nope.toml"), ConfigSource::Discovered).unwrap();
         assert!(cfg.severities.is_empty());
         assert!(cfg.ignored_rules.is_empty());
+    }
+
+    #[test]
+    fn absent_config_errors_when_explicit() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(Config::load(&tmp.path().join("nope.toml"), ConfigSource::Explicit).is_err());
     }
 
     #[test]
@@ -357,7 +378,7 @@ mod tests {
             symbol_absence = "warning"
         "#,
         );
-        let cfg = Config::load(&path).unwrap();
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
         assert_eq!(
             cfg.severities.get(&RuleId::SymbolAbsence),
             Some(&Severity::Warning)
@@ -372,7 +393,7 @@ mod tests {
             symbol_absence = "loud"
         "#,
         );
-        assert!(Config::load(&path).is_err());
+        assert!(Config::load(&path, ConfigSource::Discovered).is_err());
     }
 
     #[test]
@@ -383,7 +404,7 @@ mod tests {
             not_a_rule = "warning"
         "#,
         );
-        assert!(Config::load(&path).is_err());
+        assert!(Config::load(&path, ConfigSource::Discovered).is_err());
     }
 
     #[test]
@@ -396,7 +417,7 @@ mod tests {
             symbols = ["legacy_*"]
         "#,
         );
-        let cfg = Config::load(&path).unwrap();
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
         let root = Path::new("/root");
 
         let by_rule = make_div(RuleId::OutdatedLogic, "/root/README.md");
@@ -424,7 +445,7 @@ mod tests {
             symbol_absence = "notice"
         "#,
         );
-        let cfg = Config::load(&path).unwrap();
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
         let mut divs = vec![make_div(RuleId::SymbolAbsence, "/root/a.md")];
         cfg.apply_severity_overrides(&mut divs);
         assert_eq!(divs[0].severity, Severity::Notice);
@@ -433,7 +454,7 @@ mod tests {
     #[test]
     fn llm_defaults_when_block_absent() {
         let (_tmp, path) = write_config("");
-        let cfg = Config::load(&path).unwrap();
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
         assert!(!cfg.llm.enabled);
         assert_eq!(cfg.llm.provider, LlmProvider::Anthropic);
         assert_eq!(cfg.llm.max_calls, 50);
@@ -451,7 +472,7 @@ mod tests {
             timeout_s = 15
         "#,
         );
-        let cfg = Config::load(&path).unwrap();
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
         assert!(cfg.llm.enabled);
         assert_eq!(cfg.llm.provider, LlmProvider::OpenAi);
         assert_eq!(cfg.llm.model, "gpt-5");
@@ -468,7 +489,7 @@ mod tests {
             provider = "invented-corp"
         "#,
         );
-        assert!(Config::load(&path).is_err());
+        assert!(Config::load(&path, ConfigSource::Discovered).is_err());
     }
 
     #[test]

@@ -33,10 +33,6 @@ valid usage pattern of the current API. Reply ONLY with a JSON object of the sha
 `{\"match_spec\": <bool>, \"reason\": \"<short explanation>\"}`. No prose before or after.";
 
 impl DriftAnalyzer for LogicGapAnalyzer {
-    fn id(&self) -> &'static str {
-        "logic_gap"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let public_surface = collect_public_signatures(ctx);
         if public_surface.is_empty() {
@@ -68,7 +64,6 @@ impl DriftAnalyzer for LogicGapAnalyzer {
                 reality: verdict.reason,
                 risk: "Example teaches a pattern the public API no longer supports.".into(),
                 attribution: None,
-
             });
         }
 
@@ -219,11 +214,9 @@ mod tests {
     #[test]
     fn silent_when_client_is_null() {
         let (_tmp, ctx) = setup_example("Demonstrates anything at all.");
-        assert!(
-            LogicGapAnalyzer::new(Arc::new(NullClient))
-                .analyze(&ctx)
-                .is_empty()
-        );
+        assert!(LogicGapAnalyzer::new(Arc::new(NullClient))
+            .analyze(&ctx)
+            .is_empty());
     }
 
     #[test]
@@ -251,7 +244,11 @@ mod tests {
         let examples = tmp.path().join("examples");
         std::fs::create_dir(&examples).unwrap();
         let demo = examples.join("demo.rs");
-        std::fs::write(&demo, "//! narrative narrative narrative narrative\nfn main(){}\n").unwrap();
+        std::fs::write(
+            &demo,
+            "//! narrative narrative narrative narrative\nfn main(){}\n",
+        )
+        .unwrap();
 
         let mut ctx = ProjectContext::new(tmp.path());
         ctx.rust_files.push(demo);

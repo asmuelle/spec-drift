@@ -25,10 +25,6 @@ impl Default for MissingCoverageAnalyzer {
 }
 
 impl DriftAnalyzer for MissingCoverageAnalyzer {
-    fn id(&self) -> &'static str {
-        "missing_coverage"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let test_sources = load_test_sources(&ctx.rust_files);
         if test_sources.is_empty() {
@@ -41,8 +37,12 @@ impl DriftAnalyzer for MissingCoverageAnalyzer {
         let mut already_flagged: HashSet<(std::path::PathBuf, u32, String)> = HashSet::new();
 
         for md in &ctx.markdown_files {
-            let Ok(claims) = MarkdownParser::parse(md) else {
-                continue;
+            let claims = match MarkdownParser::parse(md) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (coverage): {e}", md.display());
+                    continue;
+                }
             };
             for claim in claims {
                 let Some(leaf) = extract_callable_leaf(&claim.text) else {
@@ -62,7 +62,11 @@ impl DriftAnalyzer for MissingCoverageAnalyzer {
                     continue;
                 }
 
-                let key = (claim.location.file.clone(), claim.location.line, leaf.clone());
+                let key = (
+                    claim.location.file.clone(),
+                    claim.location.line,
+                    leaf.clone(),
+                );
                 if !already_flagged.insert(key) {
                     continue;
                 }
@@ -70,15 +74,11 @@ impl DriftAnalyzer for MissingCoverageAnalyzer {
                 out.push(Divergence {
                     rule: RuleId::MissingCoverage,
                     severity: Severity::Notice,
-                    location: Location::new(
-                        claim.location.file.clone(),
-                        claim.location.line,
-                    ),
+                    location: Location::new(claim.location.file.clone(), claim.location.line),
                     stated: format!("`{leaf}` is a capability the project exposes"),
                     reality: format!("no test references `{leaf}` by name"),
                     risk: "Capability claimed in the docs has no guard-rail in tests.".to_string(),
                     attribution: None,
-
                 });
             }
         }
@@ -92,10 +92,7 @@ fn callable_re() -> &'static Regex {
     RE.get_or_init(|| {
         // Matches `name()` or `Type::method()` (argument list optional), capturing
         // the leaf identifier.
-        Regex::new(
-            r"^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)\([^)]*\)$",
-        )
-        .unwrap()
+        Regex::new(r"^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Za-z_][A-Za-z0-9_]*)\([^)]*\)$").unwrap()
     })
 }
 
@@ -175,11 +172,7 @@ mod tests {
 
         let test_file = tmp.path().join("tests").join("api.rs");
         std::fs::create_dir_all(test_file.parent().unwrap()).unwrap();
-        std::fs::write(
-            &test_file,
-            "#[test] fn t() { let _ = place_order(); }\n",
-        )
-        .unwrap();
+        std::fs::write(&test_file, "#[test] fn t() { let _ = place_order(); }\n").unwrap();
 
         let mut ctx = ProjectContext::new(tmp.path());
         ctx.markdown_files.push(md);

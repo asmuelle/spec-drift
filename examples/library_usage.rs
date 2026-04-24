@@ -20,7 +20,7 @@ use spec_drift::analyzers::{DocsAnalyzer, DriftAnalyzer, MissingCoverageAnalyzer
 use spec_drift::parsers::RustParser;
 use spec_drift::reporters::{HumanReporter, Reporter};
 use spec_drift::sources::FsWalker;
-use spec_drift::{Config, ProjectContext};
+use spec_drift::{Config, ConfigSource, ProjectContext};
 use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
@@ -30,10 +30,10 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("."))
         .canonicalize()?;
 
-    // `[severity]` / `[ignore]` overrides, if a config exists. A missing file
-    // is fine — Config::load returns the default in that case.
+    // `[severity]` / `[ignore]` overrides, if a config exists. Discovered
+    // paths silently default when no file is found.
     let config_path = Config::discover(&root).unwrap_or_else(|| root.join("spec-drift.toml"));
-    let config = Config::load(&config_path)?;
+    let config = Config::load(&config_path, ConfigSource::Discovered)?;
 
     // Bucket every source file in the project by kind, respecting .gitignore.
     let files = FsWalker::walk(&root)?;

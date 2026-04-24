@@ -15,10 +15,11 @@ use std::process::Command;
 
 /// Enrich each divergence with blame attribution, if the engine can resolve
 /// one. Divergences for which blame fails keep `attribution: None`.
-pub fn apply(divs: &mut [Divergence], root: &Path, engine: &dyn BlameEngine) {
-    for d in divs.iter_mut() {
+pub fn apply(mut divs: Vec<Divergence>, root: &Path, engine: &dyn BlameEngine) -> Vec<Divergence> {
+    for d in &mut divs {
         d.attribution = engine.blame(root, &d.location.file, d.location.line);
     }
+    divs
 }
 
 /// Indirection so tests don't need a real git repo.
@@ -34,7 +35,10 @@ impl BlameEngine for GitBlameEngine {
         // Git blame needs a repo-relative path. If `file` is already under
         // `root` we strip it; otherwise pass the absolute path and let git
         // resolve it itself.
-        let arg: PathBuf = file.strip_prefix(root).map(PathBuf::from).unwrap_or_else(|_| file.to_path_buf());
+        let arg: PathBuf = file
+            .strip_prefix(root)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| file.to_path_buf());
         let spec = format!("{line},{line}");
 
         let out = Command::new("git")
@@ -226,8 +230,7 @@ mod tests {
 
     #[test]
     fn apply_fills_attribution_from_engine() {
-        let mut divs = vec![div()];
-        apply(&mut divs, Path::new("."), &FakeEngine);
+        let divs = apply(vec![div()], Path::new("."), &FakeEngine);
         let a = divs[0].attribution.as_ref().unwrap();
         assert_eq!(a.commit, "deadbee");
         assert_eq!(a.author, "Test Author");
@@ -235,8 +238,7 @@ mod tests {
 
     #[test]
     fn apply_leaves_none_when_engine_cannot_resolve() {
-        let mut divs = vec![div()];
-        apply(&mut divs, Path::new("."), &NullEngine);
+        let divs = apply(vec![div()], Path::new("."), &NullEngine);
         assert!(divs[0].attribution.is_none());
     }
 }

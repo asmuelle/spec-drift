@@ -41,6 +41,21 @@ impl CargoMetadata {
     }
 
     fn load(manifest_dir: &Path) -> Self {
+        #[derive(serde::Deserialize)]
+        struct RawMetadata {
+            packages: Vec<RawPackage>,
+        }
+        #[derive(serde::Deserialize)]
+        struct RawPackage {
+            name: String,
+            targets: Vec<RawTarget>,
+        }
+        #[derive(serde::Deserialize)]
+        struct RawTarget {
+            name: String,
+            kind: Vec<String>,
+        }
+
         let out = Command::new("cargo")
             .current_dir(manifest_dir)
             .args(["metadata", "--format-version=1", "--no-deps"])
@@ -51,33 +66,17 @@ impl CargoMetadata {
         if !out.status.success() {
             return Self::default();
         }
-        let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        let Ok(md) = serde_json::from_slice::<RawMetadata>(&out.stdout) else {
             return Self::default();
         };
 
         let mut packages = Vec::new();
         let mut bins = Vec::new();
-        if let Some(arr) = v.get("packages").and_then(|p| p.as_array()) {
-            for pkg in arr {
-                if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
-                    packages.push(name.to_string());
-                }
-                if let Some(targets) = pkg.get("targets").and_then(|t| t.as_array()) {
-                    for t in targets {
-                        let kinds = t
-                            .get("kind")
-                            .and_then(|k| k.as_array())
-                            .cloned()
-                            .unwrap_or_default();
-                        let is_bin = kinds
-                            .iter()
-                            .any(|k| k.as_str().is_some_and(|s| s == "bin"));
-                        if is_bin
-                            && let Some(name) = t.get("name").and_then(|n| n.as_str())
-                        {
-                            bins.push(name.to_string());
-                        }
-                    }
+        for pkg in &md.packages {
+            packages.push(pkg.name.clone());
+            for t in &pkg.targets {
+                if t.kind.iter().any(|k| k == "bin") {
+                    bins.push(t.name.clone());
                 }
             }
         }
@@ -86,10 +85,6 @@ impl CargoMetadata {
 }
 
 impl DriftAnalyzer for CiAnalyzer {
-    fn id(&self) -> &'static str {
-        "ci"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let metadata = self
             .metadata_override
@@ -100,8 +95,12 @@ impl DriftAnalyzer for CiAnalyzer {
 
         // Makefiles and justfiles — line-oriented.
         for mk in &ctx.makefile_files {
-            let Ok(src) = std::fs::read_to_string(mk) else {
-                continue;
+            let src = match std::fs::read_to_string(mk) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (ci): {e}", mk.display());
+                    continue;
+                }
             };
             for (idx, line) in src.lines().enumerate() {
                 let line_no = (idx + 1) as u32;
@@ -114,8 +113,12 @@ impl DriftAnalyzer for CiAnalyzer {
 
         // YAML workflows — treat every line containing a cargo invocation.
         for yaml in &ctx.yaml_files {
-            let Ok(src) = std::fs::read_to_string(yaml) else {
-                continue;
+            let src = match std::fs::read_to_string(yaml) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (ci): {e}", yaml.display());
+                    continue;
+                }
             };
             if !is_workflow_path(yaml) {
                 continue;
@@ -133,8 +136,7 @@ impl DriftAnalyzer for CiAnalyzer {
 fn is_workflow_path(path: &Path) -> bool {
     // Only scan files inside a `.github/workflows/` directory to avoid noisy
     // matches in unrelated YAML (k8s manifests, docker-compose, etc.).
-    path.components()
-        .any(|c| c.as_os_str() == ".github")
+    path.components().any(|c| c.as_os_str() == ".github")
         && path.components().any(|c| c.as_os_str() == "workflows")
 }
 
@@ -145,9 +147,7 @@ fn cargo_command_re() -> &'static Regex {
 
 fn package_arg_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?:--package|-p)[ =]([A-Za-z_][A-Za-z0-9_\-]*)").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"(?:--package|-p)[ =]([A-Za-z_][A-Za-z0-9_\-]*)").unwrap())
 }
 
 fn bin_arg_re() -> &'static Regex {
@@ -182,7 +182,6 @@ fn inspect_cargo_line(
                 risk: "CI exercises a target that no longer exists; the step is a no-op at best."
                     .to_string(),
                 attribution: None,
-
             });
         }
     }
@@ -198,7 +197,6 @@ fn inspect_cargo_line(
                 reality: format!("no bin target named `{name}` in the workspace"),
                 risk: "CI step refers to a bin that doesn't exist.".to_string(),
                 attribution: None,
-
             });
         }
     }
@@ -259,7 +257,11 @@ mod tests_inner {
         let workflows = tmp.path().join(".github").join("workflows");
         std::fs::create_dir_all(&workflows).unwrap();
         let yml = workflows.join("ci.yml");
-        std::fs::write(&yml, "jobs:\n  t:\n    steps:\n      - run: cargo run --bin legacy\n").unwrap();
+        std::fs::write(
+            &yml,
+            "jobs:\n  t:\n    steps:\n      - run: cargo run --bin legacy\n",
+        )
+        .unwrap();
 
         let mut ctx = ProjectContext::new(tmp.path());
         ctx.yaml_files.push(yml);

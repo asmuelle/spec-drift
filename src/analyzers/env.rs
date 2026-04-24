@@ -27,10 +27,6 @@ impl Default for EnvMismatchAnalyzer {
 }
 
 impl DriftAnalyzer for EnvMismatchAnalyzer {
-    fn id(&self) -> &'static str {
-        "env_mismatch"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let installed = collect_installed_packages(&ctx.yaml_files);
         if installed.is_empty() {
@@ -42,8 +38,12 @@ impl DriftAnalyzer for EnvMismatchAnalyzer {
         let mut seen: HashSet<(std::path::PathBuf, u32, String)> = HashSet::new();
 
         for md in &ctx.markdown_files {
-            let Ok(claims) = MarkdownParser::parse(md) else {
-                continue;
+            let claims = match MarkdownParser::parse(md) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (env): {e}", md.display());
+                    continue;
+                }
             };
             for claim in claims {
                 let token = claim.text.trim();
@@ -67,19 +67,14 @@ impl DriftAnalyzer for EnvMismatchAnalyzer {
                 out.push(Divergence {
                     rule: RuleId::EnvMismatch,
                     severity: Severity::Notice,
-                    location: Location::new(
-                        claim.location.file.clone(),
-                        claim.location.line,
-                    ),
+                    location: Location::new(claim.location.file.clone(), claim.location.line),
                     stated: format!("project requires `{token}`"),
                     reality: format!(
                         "no CI install line covers `{token}` \
                          (or a known cross-distro equivalent)"
                     ),
-                    risk: "CI may pass on a box missing a dependency the docs promise."
-                        .to_string(),
+                    risk: "CI may pass on a box missing a dependency the docs promise.".to_string(),
                     attribution: None,
-
                 });
             }
         }
@@ -95,7 +90,12 @@ const EQUIVALENCE_CLASSES: &[&[&str]] = &[
     &["libpq-dev", "postgresql-dev", "postgresql-devel"],
     &["zlib1g-dev", "zlib-dev", "zlib-devel"],
     &["libsqlite3-dev", "sqlite-dev", "sqlite-devel"],
-    &["libcurl4-openssl-dev", "libcurl-dev", "curl-dev", "libcurl-devel"],
+    &[
+        "libcurl4-openssl-dev",
+        "libcurl-dev",
+        "curl-dev",
+        "libcurl-devel",
+    ],
     &["pkg-config", "pkgconf", "pkgconfig"],
     &["build-essential", "base-devel", "Development Tools"],
     &["libxml2-dev", "libxml2-devel"],
@@ -119,10 +119,7 @@ fn canonical_forms(name: &str) -> Vec<&'static str> {
 fn looks_like_system_package(s: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        Regex::new(
-            r"^(?:lib[a-z0-9][a-z0-9\-]*|[a-z][a-z0-9]*-(?:dev|devel|essential))$",
-        )
-        .unwrap()
+        Regex::new(r"^(?:lib[a-z0-9][a-z0-9\-]*|[a-z][a-z0-9]*-(?:dev|devel|essential))$").unwrap()
     });
     re.is_match(s)
 }

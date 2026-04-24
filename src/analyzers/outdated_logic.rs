@@ -32,16 +32,16 @@ Reply ONLY with a JSON object of the shape \
 `{\"match_spec\": <bool>, \"reason\": \"<short explanation>\"}`. No prose before or after.";
 
 impl DriftAnalyzer for OutdatedLogicAnalyzer {
-    fn id(&self) -> &'static str {
-        "outdated_logic"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         let mut out = Vec::new();
 
         for md in &ctx.markdown_files {
-            let Ok(source) = std::fs::read_to_string(md) else {
-                continue;
+            let source = match std::fs::read_to_string(md) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("spec-drift: skipping {} (outdated_logic): {e}", md.display());
+                    continue;
+                }
             };
             let sections = split_sections(&source);
 

@@ -18,7 +18,6 @@ use crate::domain::Divergence;
 /// other's output. `Send + Sync` lets the harness run analyzers in parallel
 /// under `rayon::par_iter`.
 pub trait DriftAnalyzer: Send + Sync {
-    fn id(&self) -> &'static str;
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence>;
 }
 

@@ -47,10 +47,6 @@ impl ExamplesAnalyzer {
 }
 
 impl DriftAnalyzer for ExamplesAnalyzer {
-    fn id(&self) -> &'static str {
-        "examples"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         // Skip the check entirely if the project has no examples dir.
         let examples_dir = ctx.root.join("examples");
@@ -87,12 +83,7 @@ impl CargoRunner for RealCargoRunner {
     fn check_examples(&self, manifest_dir: &std::path::Path) -> std::io::Result<String> {
         let out = Command::new("cargo")
             .current_dir(manifest_dir)
-            .args([
-                "check",
-                "--examples",
-                "--message-format=json",
-                "--quiet",
-            ])
+            .args(["check", "--examples", "--message-format=json", "--quiet"])
             .output()?;
         // cargo returns non-zero on compile error — we still want the stdout stream.
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
@@ -101,12 +92,7 @@ impl CargoRunner for RealCargoRunner {
     fn clippy_examples(&self, manifest_dir: &std::path::Path) -> std::io::Result<String> {
         let out = Command::new("cargo")
             .current_dir(manifest_dir)
-            .args([
-                "clippy",
-                "--examples",
-                "--message-format=json",
-                "--quiet",
-            ])
+            .args(["clippy", "--examples", "--message-format=json", "--quiet"])
             .output()?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
@@ -185,7 +171,6 @@ fn parse_cargo_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence>
             reality: format!("`cargo check --examples` fails: {}", message.message),
             risk: "Users copy from broken examples and ship broken code.".to_string(),
             attribution: None,
-
         });
     }
 
@@ -223,7 +208,10 @@ mod tests {
         assert_eq!(d.rule, RuleId::CompileFailure);
         assert_eq!(d.severity, Severity::Critical);
         assert_eq!(d.location.line, 7);
-        assert_eq!(d.location.file, std::path::PathBuf::from("examples/demo.rs"));
+        assert_eq!(
+            d.location.file,
+            std::path::PathBuf::from("examples/demo.rs")
+        );
     }
 
     #[test]
@@ -239,8 +227,7 @@ mod tests {
     #[test]
     fn skips_cleanly_when_no_examples_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let analyzer =
-            ExamplesAnalyzer::with_runner(Box::new(FakeRunner("SHOULD NOT RUN".into())));
+        let analyzer = ExamplesAnalyzer::with_runner(Box::new(FakeRunner("SHOULD NOT RUN".into())));
         let ctx = ProjectContext::new(tmp.path());
         assert!(analyzer.analyze(&ctx).is_empty());
     }

@@ -33,10 +33,6 @@ impl ConstraintAnalyzer {
 }
 
 impl DriftAnalyzer for ConstraintAnalyzer {
-    fn id(&self) -> &'static str {
-        "constraint_violation"
-    }
-
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
         if self.rules.is_empty() {
             return Vec::new();
@@ -72,24 +68,12 @@ fn check_file(path: &Path, rule: &ConstraintRule, out: &mut Vec<Divergence>) {
 fn inspect_item(item: &syn::Item, path: &Path, rule: &ConstraintRule, out: &mut Vec<Divergence>) {
     match item {
         syn::Item::Fn(f) => {
-            compare_return_type(
-                &f.sig,
-                &f.sig.ident.to_string(),
-                path,
-                rule,
-                out,
-            );
+            compare_return_type(&f.sig, &f.sig.ident.to_string(), path, rule, out);
         }
         syn::Item::Impl(i) => {
             for impl_item in &i.items {
                 if let syn::ImplItem::Fn(f) = impl_item {
-                    compare_return_type(
-                        &f.sig,
-                        &f.sig.ident.to_string(),
-                        path,
-                        rule,
-                        out,
-                    );
+                    compare_return_type(&f.sig, &f.sig.ident.to_string(), path, rule, out);
                 }
             }
         }
@@ -133,14 +117,9 @@ fn compare_return_type(
             "constraint `{}`: `{}` should return `{}`",
             rule.name, fn_name, expected
         ),
-        reality: format!(
-            "`{}` returns `{}`",
-            fn_name,
-            normalize(&actual)
-        ),
+        reality: format!("`{}` returns `{}`", fn_name, normalize(&actual)),
         risk: "Functions under this glob have drifted from the stated contract.".to_string(),
         attribution: None,
-
     });
 }
 
@@ -186,10 +165,7 @@ fn wildcard_eq(pattern: &str, actual: &str) -> bool {
             let mut matched = 0;
             while a_idx + matched < a.len() {
                 let c = a[a_idx + matched];
-                if depth_angle == 0
-                    && depth_paren == 0
-                    && (c == b',' || c == b'>' || c == b')')
-                {
+                if depth_angle == 0 && depth_paren == 0 && (c == b',' || c == b'>' || c == b')') {
                     break;
                 }
                 match c {

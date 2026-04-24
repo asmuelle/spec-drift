@@ -1,20 +1,5 @@
 use clap::Parser;
-use spec_drift::analyzers::{
-    CiAnalyzer, ConstraintAnalyzer, DeprecatedUsageAnalyzer, DocsAnalyzer, DriftAnalyzer,
-    EnvMismatchAnalyzer, ExamplesAnalyzer, LogicGapAnalyzer, MissingCoverageAnalyzer,
-    OutdatedLogicAnalyzer, TestsAnalyzer,
-};
-use spec_drift::baseline;
-use spec_drift::config::Config;
-use spec_drift::context::ProjectContext;
-use spec_drift::domain::Severity;
-use spec_drift::parsers::RustParser;
-use spec_drift::reporters::{
-    FixPromptReporter, HumanReporter, JsonReporter, Reporter, SarifReporter,
-};
-use spec_drift::sources::{FsWalker, GitHistory};
-use spec_drift::suppress;
-use spec_drift::workspace;
+use spec_drift::{Pillar, RunConfig, Severity};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -89,7 +74,7 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
+    match spec_drift::run_cli(&into_run_config(cli)) {
         Ok(exit) => exit,
         Err(e) => {
             eprintln!("spec-drift: {e}");
@@ -98,131 +83,37 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> anyhow::Result<ExitCode> {
-    let root = cli.root.canonicalize()?;
-
-    let config_path = cli
-        .config
-        .clone()
-        .or_else(|| Config::discover(&root))
-        .unwrap_or_else(|| root.join("spec-drift.toml"));
-    let config = Config::load(&config_path)?;
-
-    let mut files = FsWalker::walk(&root)?;
-    if let Some(reference) = cli.diff.as_deref() {
-        match GitHistory::changed_files(&root, reference) {
-            Some(changed) => {
-                files = GitHistory::narrow(files, &changed);
-            }
-            None => {
-                eprintln!(
-                    "spec-drift: --diff {reference}: git unavailable or ref unknown; \
-                     scanning full tree."
-                );
-            }
-        }
-    }
-
-    if let Some(name) = cli.package.as_deref() {
-        let packages = workspace::load(&root);
-        let pkg = workspace::find(&packages, name).map_err(anyhow::Error::msg)?;
-        files.rust = workspace::narrow_paths(files.rust, pkg);
-        files.markdown = workspace::narrow_paths(files.markdown, pkg);
-        files.yaml = workspace::narrow_paths(files.yaml, pkg);
-        files.makefiles = workspace::narrow_paths(files.makefiles, pkg);
-    }
-
-    let mut ctx = ProjectContext::new(&root);
-    ctx.rust_files = files.rust;
-    ctx.markdown_files = files.markdown;
-    ctx.yaml_files = files.yaml;
-    ctx.makefile_files = files.makefiles;
-
-    for rs in &ctx.rust_files {
-        match RustParser::parse(rs) {
-            Ok(facts) => ctx.code_facts.extend(facts),
-            Err(e) => eprintln!("spec-drift: skipping {}: {e}", rs.display()),
-        }
-    }
-
-    let analyzers = select_analyzers(&cli, &config);
-    let mut divergences = spec_drift::run(&ctx, &analyzers);
-    divergences = spec_drift::apply_config(divergences, &config, &root);
-    divergences = suppress::apply_inline_ignores(divergences);
-
-    if let Some(baseline_path) = cli.baseline.as_ref() {
-        let baseline = baseline::load(baseline_path)?;
-        divergences = baseline::subtract(divergences, &baseline);
-    }
-
-    if cli.strict {
-        spec_drift::apply_strict(&mut divergences);
-    }
-
-    if cli.blame {
-        spec_drift::blame::apply(
-            &mut divergences,
-            &root,
-            &spec_drift::blame::GitBlameEngine,
-        );
-    }
-
-    let rendered = if cli.fix_prompt {
-        FixPromptReporter.render(&divergences)
+fn into_run_config(cli: Cli) -> RunConfig {
+    let pillar = if cli.docs {
+        Pillar::Docs
+    } else if cli.examples {
+        Pillar::Examples
+    } else if cli.tests {
+        Pillar::Tests
+    } else if cli.ci {
+        Pillar::Ci
     } else {
-        match cli.format.as_str() {
-            "json" => JsonReporter.render(&divergences),
-            "sarif" => SarifReporter.render(&divergences),
-            _ => HumanReporter.render(&divergences),
-        }
+        Pillar::All
     };
-    print!("{rendered}");
 
-    let threshold = parse_severity(&cli.deny);
-    let has_blocking = divergences.iter().any(|d| d.severity >= threshold);
-    if has_blocking {
-        Ok(ExitCode::from(1))
-    } else {
-        Ok(ExitCode::SUCCESS)
-    }
-}
-
-fn parse_severity(s: &str) -> Severity {
-    match s {
+    let deny = match cli.deny.as_str() {
         "critical" => Severity::Critical,
         "warning" => Severity::Warning,
         _ => Severity::Notice,
-    }
-}
+    };
 
-fn select_analyzers(cli: &Cli, config: &Config) -> Vec<Box<dyn DriftAnalyzer>> {
-    let any_specific = cli.docs || cli.examples || cli.tests || cli.ci;
-
-    // Build the LLM client once and share it. `--no-llm` wins over config.
-    let llm_client = spec_drift::llm::build_client(&config.llm, cli.no_llm);
-
-    let mut v: Vec<Box<dyn DriftAnalyzer>> = Vec::new();
-    if !any_specific || cli.docs {
-        v.push(Box::new(DocsAnalyzer::default()));
-        v.push(Box::new(MissingCoverageAnalyzer));
-        if !config.constraint_rules.is_empty() {
-            v.push(Box::new(ConstraintAnalyzer::new(
-                config.constraint_rules.clone(),
-            )));
-        }
-        v.push(Box::new(OutdatedLogicAnalyzer::new(llm_client.clone())));
+    RunConfig {
+        root: cli.root,
+        pillar,
+        format: cli.format,
+        fix_prompt: cli.fix_prompt,
+        config: cli.config,
+        baseline: cli.baseline,
+        diff: cli.diff,
+        package: cli.package,
+        deny,
+        strict: cli.strict,
+        no_llm: cli.no_llm,
+        blame: cli.blame,
     }
-    if !any_specific || cli.examples {
-        v.push(Box::new(ExamplesAnalyzer::default()));
-        v.push(Box::new(DeprecatedUsageAnalyzer::default()));
-        v.push(Box::new(LogicGapAnalyzer::new(llm_client.clone())));
-    }
-    if !any_specific || cli.tests {
-        v.push(Box::new(TestsAnalyzer));
-    }
-    if !any_specific || cli.ci {
-        v.push(Box::new(CiAnalyzer::default()));
-        v.push(Box::new(EnvMismatchAnalyzer));
-    }
-    v
 }
