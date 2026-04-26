@@ -39,7 +39,10 @@ impl DriftAnalyzer for OutdatedLogicAnalyzer {
             let source = match std::fs::read_to_string(md) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("spec-drift: skipping {} (outdated_logic): {e}", md.display());
+                    eprintln!(
+                        "spec-drift: skipping {} (outdated_logic): {e}",
+                        md.display()
+                    );
                     continue;
                 }
             };
@@ -76,7 +79,6 @@ impl DriftAnalyzer for OutdatedLogicAnalyzer {
                     reality: verdict.reason,
                     risk: "Docs teach behavior the code no longer implements.".into(),
                     attribution: None,
-
                 });
             }
         }
@@ -258,11 +260,7 @@ mod tests {
     fn flags_when_model_says_drift() {
         let tmp = tempfile::tempdir().unwrap();
         let md = tmp.path().join("README.md");
-        std::fs::write(
-            &md,
-            "## Usage\n\nCall `start()` to begin the flow.\n",
-        )
-        .unwrap();
+        std::fs::write(&md, "## Usage\n\nCall `start()` to begin the flow.\n").unwrap();
         let rs = tmp.path().join("lib.rs");
         std::fs::write(&rs, "pub fn start() { /* old impl */ }\n").unwrap();
 

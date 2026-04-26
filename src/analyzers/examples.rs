@@ -2,7 +2,7 @@ use super::DriftAnalyzer;
 use crate::context::ProjectContext;
 use crate::domain::{Divergence, Location, RuleId, Severity};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// ExamplesAnalyzer — enforces `compile_failure`.
@@ -42,19 +42,20 @@ impl ExamplesAnalyzer {
     fn manifest(&self, ctx: &ProjectContext) -> PathBuf {
         self.manifest_override
             .clone()
-            .unwrap_or_else(|| ctx.root.clone())
+            .unwrap_or_else(|| ctx.analysis_root.clone())
     }
 }
 
 impl DriftAnalyzer for ExamplesAnalyzer {
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
-        // Skip the check entirely if the project has no examples dir.
-        let examples_dir = ctx.root.join("examples");
+        let manifest = self.manifest(ctx);
+        // Skip the check entirely if the selected package has no examples dir.
+        let examples_dir = manifest.join("examples");
         if !examples_dir.exists() {
             return Vec::new();
         }
 
-        let stdout = match self.runner.check_examples(&self.manifest(ctx)) {
+        let stdout = match self.runner.check_examples(&manifest) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("spec-drift: cargo check --examples failed to launch: {e}");
@@ -62,7 +63,7 @@ impl DriftAnalyzer for ExamplesAnalyzer {
             }
         };
 
-        parse_cargo_messages(&stdout, &ctx.root)
+        parse_cargo_messages(&stdout, &manifest, &ctx.root)
     }
 }
 
@@ -121,7 +122,7 @@ struct DiagSpan {
     is_primary: bool,
 }
 
-fn parse_cargo_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence> {
+fn parse_cargo_messages(stdout: &str, manifest_root: &Path, report_root: &Path) -> Vec<Divergence> {
     let mut out = Vec::new();
 
     for line in stdout.lines() {
@@ -148,26 +149,28 @@ fn parse_cargo_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence>
 
         let Some(span) = span else { continue };
 
-        let path = std::path::Path::new(&span.file_name);
-        // Only report diagnostics rooted in the project's `examples/` directory.
+        let path = Path::new(&span.file_name);
+        // Only report diagnostics rooted in the selected package's `examples/`
+        // directory, while rendering locations relative to the workspace root.
         let abs = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            root.join(path)
+            manifest_root.join(path)
         };
-        let rel = abs.strip_prefix(root).unwrap_or(&abs);
-        let Some(first) = rel.components().next() else {
+        let package_rel = abs.strip_prefix(manifest_root).unwrap_or(&abs);
+        let Some(first) = package_rel.components().next() else {
             continue;
         };
         if first.as_os_str() != "examples" {
             continue;
         }
+        let report_path = abs.strip_prefix(report_root).unwrap_or(&abs);
 
         out.push(Divergence {
             rule: RuleId::CompileFailure,
             severity: Severity::Critical,
-            location: Location::new(rel.to_path_buf(), span.line_start),
-            stated: format!("`{}` demonstrates the current API", rel.display()),
+            location: Location::new(report_path.to_path_buf(), span.line_start),
+            stated: format!("`{}` demonstrates the current API", report_path.display()),
             reality: format!("`cargo check --examples` fails: {}", message.message),
             risk: "Users copy from broken examples and ship broken code.".to_string(),
             attribution: None,
@@ -211,6 +214,27 @@ mod tests {
         assert_eq!(
             d.location.file,
             std::path::PathBuf::from("examples/demo.rs")
+        );
+    }
+
+    #[test]
+    fn package_examples_are_reported_relative_to_workspace_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let member = tmp.path().join("crates").join("api");
+        std::fs::create_dir_all(member.join("examples")).unwrap();
+        std::fs::write(member.join("examples/demo.rs"), "// placeholder").unwrap();
+
+        let stdout = r#"{"reason":"compiler-message","message":{"message":"mismatched types","level":"error","spans":[{"file_name":"examples/demo.rs","line_start":4,"is_primary":true}]}}"#;
+
+        let mut ctx = ProjectContext::new(tmp.path());
+        ctx.analysis_root = member;
+        let analyzer = ExamplesAnalyzer::with_runner(Box::new(FakeRunner(stdout.to_string())));
+        let divergences = analyzer.analyze(&ctx);
+
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(
+            divergences[0].location.file,
+            std::path::PathBuf::from("crates/api/examples/demo.rs")
         );
     }
 

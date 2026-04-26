@@ -40,9 +40,7 @@ impl AnthropicLlmClient {
             }],
         };
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(self.timeout)
-            .build();
+        let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
 
         let resp = agent
             .post("https://api.anthropic.com/v1/messages")
@@ -146,8 +144,7 @@ mod tests {
 
     #[test]
     fn parses_bare_json_verdict() {
-        let v =
-            parse_verdict(r#"{"match_spec": true, "reason": "all good"}"#).unwrap();
+        let v = parse_verdict(r#"{"match_spec": true, "reason": "all good"}"#).unwrap();
         assert!(v.match_spec);
         assert_eq!(v.reason, "all good");
     }

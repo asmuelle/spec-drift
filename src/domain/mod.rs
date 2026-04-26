@@ -192,7 +192,10 @@ mod tests {
 
     #[test]
     fn confidence_matches_readme_matrix() {
-        assert_eq!(RuleId::SymbolAbsence.confidence(), Confidence::Deterministic);
+        assert_eq!(
+            RuleId::SymbolAbsence.confidence(),
+            Confidence::Deterministic
+        );
         assert_eq!(RuleId::GhostCommand.confidence(), Confidence::Deterministic);
         assert_eq!(RuleId::LyingTest.confidence(), Confidence::Heuristic);
         assert_eq!(RuleId::EnvMismatch.confidence(), Confidence::Heuristic);

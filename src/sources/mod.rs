@@ -32,7 +32,10 @@ impl FsWalker {
                 .unwrap_or_default();
 
             // Makefile / justfile have no extension; match by filename.
-            if matches!(file_name, "Makefile" | "makefile" | "GNUmakefile" | "justfile") {
+            if matches!(
+                file_name,
+                "Makefile" | "makefile" | "GNUmakefile" | "justfile"
+            ) {
                 out.makefiles.push(path);
                 continue;
             }

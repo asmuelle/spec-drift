@@ -120,7 +120,10 @@ struct SarifResult {
     level: &'static str,
     message: SarifText,
     locations: Vec<SarifLocation>,
-    #[serde(rename = "partialFingerprints", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "partialFingerprints",
+        skip_serializing_if = "Option::is_none"
+    )]
     partial_fingerprints: Option<SarifFingerprints>,
 }
 
@@ -175,7 +178,6 @@ mod tests {
             reality: "X doesn't exist".into(),
             risk: "bad".into(),
             attribution: None,
-
         }
     }
 

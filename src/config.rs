@@ -345,7 +345,6 @@ mod tests {
             reality: "not found".into(),
             risk: "x".into(),
             attribution: None,
-
         }
     }
 

@@ -22,14 +22,16 @@ pub mod workspace;
 pub use config::{Config, ConfigSource};
 pub use context::ProjectContext;
 pub use domain::{
-    Attribution, ClaimKind, CodeFact, Confidence, Divergence, FactKind, Location, RuleId,
-    Severity, SpecClaim,
+    Attribution, ClaimKind, CodeFact, Confidence, Divergence, FactKind, Location, RuleId, Severity,
+    SpecClaim,
 };
 pub use error::SpecDriftError;
 
 use analyzers::DriftAnalyzer;
 use rayon::prelude::*;
 use reporters::Reporter;
+use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -153,23 +155,26 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     let config = Config::load(&config_path, source)?;
 
     let mut files = sources::FsWalker::walk(&root)?;
-    if let Some(ref reference) = cfg.diff {
+    let changed_files = if let Some(ref reference) = cfg.diff {
         match sources::GitHistory::changed_files(&root, reference) {
-            Some(changed) => {
-                files = sources::GitHistory::narrow(files, &changed);
-            }
+            Some(changed) => Some(changed),
             None => {
                 eprintln!(
                     "spec-drift: --diff {reference}: git unavailable or ref unknown; \
                      scanning full tree."
                 );
+                None
             }
         }
-    }
+    } else {
+        None
+    };
 
+    let mut analysis_root = root.clone();
     if let Some(ref name) = cfg.package {
         let packages = workspace::load(&root);
         let pkg = workspace::find(&packages, name).map_err(anyhow::Error::msg)?;
+        analysis_root = pkg.root.clone();
         files.rust = workspace::narrow_paths(files.rust, pkg);
         files.markdown = workspace::narrow_paths(files.markdown, pkg);
         files.yaml = workspace::narrow_paths(files.yaml, pkg);
@@ -177,6 +182,7 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     }
 
     let mut ctx = ProjectContext::new(&root);
+    ctx.analysis_root = analysis_root;
     ctx.rust_files = files.rust;
     ctx.markdown_files = files.markdown;
     ctx.yaml_files = files.yaml;
@@ -191,6 +197,9 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
 
     let analyzers = build_analyzers(cfg.pillar, &config, cfg.no_llm);
     let mut divergences = run(&ctx, &analyzers);
+    if let Some(changed) = changed_files.as_ref() {
+        divergences = filter_to_changed(divergences, &root, changed);
+    }
     divergences = apply_config(divergences, &config, &root);
     divergences = suppress::apply_inline_ignores(divergences);
 
@@ -204,8 +213,7 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     }
 
     if cfg.blame {
-        divergences =
-            blame::apply(divergences, &root, &blame::GitBlameEngine);
+        divergences = blame::apply(divergences, &root, &blame::GitBlameEngine);
     }
 
     let rendered = if cfg.fix_prompt {
@@ -227,13 +235,29 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     }
 }
 
+fn filter_to_changed(
+    divs: Vec<Divergence>,
+    root: &Path,
+    changed: &HashSet<PathBuf>,
+) -> Vec<Divergence> {
+    divs.into_iter()
+        .filter(|d| divergence_is_in_changed_file(d, root, changed))
+        .collect()
+}
+
+fn divergence_is_in_changed_file(d: &Divergence, root: &Path, changed: &HashSet<PathBuf>) -> bool {
+    if changed.contains(&d.location.file) {
+        return true;
+    }
+    if d.location.file.is_relative() {
+        return changed.contains(&root.join(&d.location.file));
+    }
+    false
+}
+
 /// Build the analyzer list for the selected pillar(s), wiring the LLM client
 /// once so it is shared across all LLM-backed analyzers.
-fn build_analyzers(
-    pillar: Pillar,
-    config: &Config,
-    no_llm: bool,
-) -> Vec<Box<dyn DriftAnalyzer>> {
+fn build_analyzers(pillar: Pillar, config: &Config, no_llm: bool) -> Vec<Box<dyn DriftAnalyzer>> {
     let docs = matches!(pillar, Pillar::All | Pillar::Docs);
     let examples = matches!(pillar, Pillar::All | Pillar::Examples);
     let tests = matches!(pillar, Pillar::All | Pillar::Tests);
@@ -269,4 +293,33 @@ fn build_analyzers(
         v.push(Box::new(analyzers::EnvMismatchAnalyzer));
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Location, RuleId};
+
+    fn div(path: &str) -> Divergence {
+        Divergence {
+            rule: RuleId::SymbolAbsence,
+            severity: Severity::Critical,
+            location: Location::new(path, 1),
+            stated: "x".into(),
+            reality: "y".into(),
+            risk: "z".into(),
+            attribution: None,
+        }
+    }
+
+    #[test]
+    fn diff_filter_matches_relative_locations_against_changed_absolute_paths() {
+        let root = Path::new("/repo");
+        let changed = HashSet::from([PathBuf::from("/repo/README.md")]);
+
+        let out = filter_to_changed(vec![div("README.md"), div("src/lib.rs")], root, &changed);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].location.file, PathBuf::from("README.md"));
+    }
 }

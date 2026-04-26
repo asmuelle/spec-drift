@@ -76,7 +76,6 @@ mod tests {
             reality: "y".into(),
             risk: "z".into(),
             attribution: None,
-
         }
     }
 

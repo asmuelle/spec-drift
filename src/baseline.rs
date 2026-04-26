@@ -42,10 +42,11 @@ pub fn load(path: &Path) -> Result<HashSet<Identity>, SpecDriftError> {
         path: path.to_path_buf(),
         source: e,
     })?;
-    let divs: Vec<Divergence> = serde_json::from_str(&raw).map_err(|e| SpecDriftError::Baseline {
-        path: path.to_path_buf(),
-        message: format!("failed to parse baseline JSON: {e}"),
-    })?;
+    let divs: Vec<Divergence> =
+        serde_json::from_str(&raw).map_err(|e| SpecDriftError::Baseline {
+            path: path.to_path_buf(),
+            message: format!("failed to parse baseline JSON: {e}"),
+        })?;
     Ok(divs.iter().map(Identity::from).collect())
 }
 
@@ -71,7 +72,6 @@ mod tests {
             reality: "r".into(),
             risk: "k".into(),
             attribution: None,
-
         }
     }
 

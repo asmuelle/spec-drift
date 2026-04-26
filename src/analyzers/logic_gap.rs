@@ -214,9 +214,11 @@ mod tests {
     #[test]
     fn silent_when_client_is_null() {
         let (_tmp, ctx) = setup_example("Demonstrates anything at all.");
-        assert!(LogicGapAnalyzer::new(Arc::new(NullClient))
-            .analyze(&ctx)
-            .is_empty());
+        assert!(
+            LogicGapAnalyzer::new(Arc::new(NullClient))
+                .analyze(&ctx)
+                .is_empty()
+        );
     }
 
     #[test]

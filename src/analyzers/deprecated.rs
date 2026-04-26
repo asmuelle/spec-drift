@@ -1,9 +1,9 @@
-use super::examples::{CargoRunner, RealCargoRunner};
 use super::DriftAnalyzer;
+use super::examples::{CargoRunner, RealCargoRunner};
 use crate::context::ProjectContext;
 use crate::domain::{Divergence, Location, RuleId, Severity};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// DeprecatedUsageAnalyzer — enforces `deprecated_usage`.
 ///
@@ -31,12 +31,13 @@ impl DeprecatedUsageAnalyzer {
 
 impl DriftAnalyzer for DeprecatedUsageAnalyzer {
     fn analyze(&self, ctx: &ProjectContext) -> Vec<Divergence> {
-        let examples_dir = ctx.root.join("examples");
+        let manifest = &ctx.analysis_root;
+        let examples_dir = manifest.join("examples");
         if !examples_dir.exists() {
             return Vec::new();
         }
 
-        let stdout = match self.runner.clippy_examples(&ctx.root) {
+        let stdout = match self.runner.clippy_examples(manifest) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("spec-drift: cargo clippy --examples failed to launch: {e}");
@@ -44,7 +45,7 @@ impl DriftAnalyzer for DeprecatedUsageAnalyzer {
             }
         };
 
-        parse_clippy_messages(&stdout, &ctx.root)
+        parse_clippy_messages(&stdout, manifest, &ctx.root)
     }
 }
 
@@ -77,7 +78,11 @@ struct DiagSpan {
     is_primary: bool,
 }
 
-fn parse_clippy_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence> {
+fn parse_clippy_messages(
+    stdout: &str,
+    manifest_root: &Path,
+    report_root: &Path,
+) -> Vec<Divergence> {
     let mut out = Vec::new();
 
     for line in stdout.lines() {
@@ -108,25 +113,26 @@ fn parse_clippy_messages(stdout: &str, root: &std::path::Path) -> Vec<Divergence
             .or_else(|| message.spans.first());
         let Some(span) = span else { continue };
 
-        let path = std::path::Path::new(&span.file_name);
+        let path = Path::new(&span.file_name);
         let abs: PathBuf = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            root.join(path)
+            manifest_root.join(path)
         };
-        let rel = abs.strip_prefix(root).unwrap_or(&abs);
-        let Some(first) = rel.components().next() else {
+        let package_rel = abs.strip_prefix(manifest_root).unwrap_or(&abs);
+        let Some(first) = package_rel.components().next() else {
             continue;
         };
         if first.as_os_str() != "examples" {
             continue;
         }
+        let report_path = abs.strip_prefix(report_root).unwrap_or(&abs);
 
         out.push(Divergence {
             rule: RuleId::DeprecatedUsage,
             severity: Severity::Warning,
-            location: Location::new(rel.to_path_buf(), span.line_start),
-            stated: format!("`{}` demonstrates supported API", rel.display()),
+            location: Location::new(report_path.to_path_buf(), span.line_start),
+            stated: format!("`{}` demonstrates supported API", report_path.display()),
             reality: format!("example uses deprecated API: {}", message.message),
             risk: "Examples teach users a pattern the codebase is retiring.".to_string(),
             attribution: None,
@@ -172,6 +178,27 @@ mod tests {
         assert_eq!(divs[0].rule, RuleId::DeprecatedUsage);
         assert_eq!(divs[0].severity, Severity::Warning);
         assert_eq!(divs[0].location.line, 12);
+    }
+
+    #[test]
+    fn package_examples_are_reported_relative_to_workspace_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let member = tmp.path().join("crates").join("api");
+        std::fs::create_dir_all(member.join("examples")).unwrap();
+
+        let stdout = r#"{"reason":"compiler-message","message":{"message":"use of deprecated function","level":"warning","code":{"code":"deprecated"},"spans":[{"file_name":"examples/demo.rs","line_start":9,"is_primary":true}]}}"#;
+
+        let mut ctx = ProjectContext::new(tmp.path());
+        ctx.analysis_root = member;
+        let analyzer =
+            DeprecatedUsageAnalyzer::with_runner(Box::new(FakeRunner(stdout.to_string())));
+        let divs = analyzer.analyze(&ctx);
+
+        assert_eq!(divs.len(), 1);
+        assert_eq!(
+            divs[0].location.file,
+            std::path::PathBuf::from("crates/api/examples/demo.rs")
+        );
     }
 
     #[test]

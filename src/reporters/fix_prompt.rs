@@ -38,13 +38,22 @@ impl Reporter for FixPromptReporter {
         )
         .unwrap();
         out.push('\n');
-        writeln!(out, "Preserve formatting, do not invent facts, and keep edits minimal.")
-            .unwrap();
+        writeln!(
+            out,
+            "Preserve formatting, do not invent facts, and keep edits minimal."
+        )
+        .unwrap();
         out.push('\n');
 
         for (i, d) in divergences.iter().enumerate() {
-            writeln!(out, "## Task {} — `{}` ({})", i + 1, d.rule.as_str(), d.severity.glyph())
-                .unwrap();
+            writeln!(
+                out,
+                "## Task {} — `{}` ({})",
+                i + 1,
+                d.rule.as_str(),
+                d.severity.glyph()
+            )
+            .unwrap();
             writeln!(
                 out,
                 "- **Location:** `{}:{}`",
@@ -83,7 +92,6 @@ mod tests {
             reality: "no `new` found in sources".into(),
             risk: "docs lie".into(),
             attribution: None,
-
         }
     }
 

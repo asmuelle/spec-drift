@@ -88,17 +88,18 @@ pub fn build_client(cfg: &LlmConfig, force_off: bool) -> Arc<dyn LlmClient> {
     }
 
     let inner: Arc<dyn LlmClient> = match cfg.provider {
-        LlmProvider::Anthropic => match AnthropicLlmClient::from_env(cfg.model.clone(), cfg.timeout_s)
-        {
-            Some(c) => Arc::new(c),
-            None => {
-                eprintln!(
-                    "spec-drift: [llm] enabled but ANTHROPIC_API_KEY is not set; \
+        LlmProvider::Anthropic => {
+            match AnthropicLlmClient::from_env(cfg.model.clone(), cfg.timeout_s) {
+                Some(c) => Arc::new(c),
+                None => {
+                    eprintln!(
+                        "spec-drift: [llm] enabled but ANTHROPIC_API_KEY is not set; \
                      skipping LLM rules for this run."
-                );
-                Arc::new(NullLlmClient)
+                    );
+                    Arc::new(NullLlmClient)
+                }
             }
-        },
+        }
         LlmProvider::OpenAi | LlmProvider::Local => {
             eprintln!(
                 "spec-drift: [llm].provider {:?} is not implemented yet; \
