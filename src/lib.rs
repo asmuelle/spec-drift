@@ -181,6 +181,18 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
         files.makefiles = workspace::narrow_paths(files.makefiles, pkg);
     }
 
+    let diff_scope = changed_files.map(|changed| {
+        let changed = if cfg.package.is_some() {
+            changed
+                .into_iter()
+                .filter(|p| p.starts_with(&analysis_root))
+                .collect()
+        } else {
+            changed
+        };
+        DiffScope::new(&root, changed)
+    });
+
     let mut ctx = ProjectContext::new(&root);
     ctx.analysis_root = analysis_root;
     ctx.rust_files = files.rust;
@@ -197,8 +209,8 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
 
     let analyzers = build_analyzers(cfg.pillar, &config, cfg.no_llm);
     let mut divergences = run(&ctx, &analyzers);
-    if let Some(changed) = changed_files.as_ref() {
-        divergences = filter_to_changed(divergences, &root, changed);
+    if let Some(scope) = diff_scope.as_ref() {
+        divergences = filter_to_diff_scope(divergences, &root, scope);
     }
     divergences = apply_config(divergences, &config, &root);
     divergences = suppress::apply_inline_ignores(divergences);
@@ -235,13 +247,31 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     }
 }
 
-fn filter_to_changed(
-    divs: Vec<Divergence>,
-    root: &Path,
-    changed: &HashSet<PathBuf>,
-) -> Vec<Divergence> {
+struct DiffScope {
+    changed: HashSet<PathBuf>,
+    implementation_changed: bool,
+    cargo_metadata_changed: bool,
+}
+
+impl DiffScope {
+    fn new(root: &Path, changed: HashSet<PathBuf>) -> Self {
+        let implementation_changed = changed.iter().any(|p| is_rust_implementation_path(root, p));
+        let cargo_metadata_changed = changed.iter().any(|p| is_cargo_manifest_path(p));
+
+        Self {
+            changed,
+            implementation_changed,
+            cargo_metadata_changed,
+        }
+    }
+}
+
+fn filter_to_diff_scope(divs: Vec<Divergence>, root: &Path, scope: &DiffScope) -> Vec<Divergence> {
     divs.into_iter()
-        .filter(|d| divergence_is_in_changed_file(d, root, changed))
+        .filter(|d| {
+            divergence_is_in_changed_file(d, root, &scope.changed)
+                || could_be_diff_induced(d, scope)
+        })
         .collect()
 }
 
@@ -252,7 +282,37 @@ fn divergence_is_in_changed_file(d: &Divergence, root: &Path, changed: &HashSet<
     if d.location.file.is_relative() {
         return changed.contains(&root.join(&d.location.file));
     }
+    if let Ok(rel) = d.location.file.strip_prefix(root) {
+        return changed.contains(rel);
+    }
     false
+}
+
+fn could_be_diff_induced(d: &Divergence, scope: &DiffScope) -> bool {
+    match d.rule {
+        RuleId::SymbolAbsence
+        | RuleId::CompileFailure
+        | RuleId::DeprecatedUsage
+        | RuleId::OutdatedLogic
+        | RuleId::LogicGap => scope.implementation_changed || scope.cargo_metadata_changed,
+        RuleId::ConstraintViolation => scope.implementation_changed,
+        RuleId::GhostCommand => scope.cargo_metadata_changed,
+        RuleId::MissingCoverage | RuleId::LyingTest | RuleId::EnvMismatch => false,
+    }
+}
+
+fn is_rust_implementation_path(root: &Path, path: &Path) -> bool {
+    if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+        return false;
+    }
+
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    !rel.components()
+        .any(|c| c.as_os_str() == "tests" || c.as_os_str() == "examples")
+}
+
+fn is_cargo_manifest_path(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml")
 }
 
 /// Build the analyzer list for the selected pillar(s), wiring the LLM client
@@ -315,11 +375,38 @@ mod tests {
     #[test]
     fn diff_filter_matches_relative_locations_against_changed_absolute_paths() {
         let root = Path::new("/repo");
-        let changed = HashSet::from([PathBuf::from("/repo/README.md")]);
+        let scope = DiffScope::new(root, HashSet::from([PathBuf::from("/repo/README.md")]));
 
-        let out = filter_to_changed(vec![div("README.md"), div("src/lib.rs")], root, &changed);
+        let out = filter_to_diff_scope(vec![div("README.md"), div("src/lib.rs")], root, &scope);
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].location.file, PathBuf::from("README.md"));
+    }
+
+    #[test]
+    fn diff_filter_keeps_doc_drift_when_implementation_changed() {
+        let root = Path::new("/repo");
+        let scope = DiffScope::new(root, HashSet::from([PathBuf::from("/repo/src/lib.rs")]));
+
+        let out = filter_to_diff_scope(vec![div("README.md")], root, &scope);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rule, RuleId::SymbolAbsence);
+    }
+
+    #[test]
+    fn diff_filter_keeps_ci_drift_when_cargo_manifest_changed() {
+        let root = Path::new("/repo");
+        let scope = DiffScope::new(root, HashSet::from([PathBuf::from("/repo/Cargo.toml")]));
+        let ghost = Divergence {
+            rule: RuleId::GhostCommand,
+            location: Location::new(".github/workflows/ci.yml", 10),
+            ..div(".github/workflows/ci.yml")
+        };
+
+        let out = filter_to_diff_scope(vec![ghost], root, &scope);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rule, RuleId::GhostCommand);
     }
 }

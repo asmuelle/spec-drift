@@ -148,7 +148,7 @@ spec-drift --format sarif --deny warning --baseline .spec-drift.baseline.json
 | `--config <path>`                         | Path to `spec-drift.toml`. Default: walk up from CWD.                   |
 | `--fix-prompt`                            | Emit a structured correction prompt instead of a report.                |
 | `--strict`                                | Promote heuristic rules one severity level.                             |
-| `--diff <ref>`                            | Only analyze files changed since the given git ref (e.g. `HEAD`).       |
+| `--diff <ref>`                            | Focus on files changed since the given git ref and drift induced by changed code. |
 | `--blame`                                 | Attribute each divergence to the commit/author/date that wrote the line.|
 | `--package <name>`                        | Restrict analysis to one member of a cargo workspace.                   |
 | `--no-llm`                                | Disable all LLM-backed checks regardless of config.                     |
@@ -217,7 +217,7 @@ jobs:
 
 | Input                | Default  | Purpose                                                                |
 |----------------------|----------|------------------------------------------------------------------------|
-| `version`            | `main`   | git ref (branch, tag, or SHA) to install.                              |
+| `version`            | `v0.1.0` | git ref (branch, tag, or SHA) to install.                              |
 | `format`             | `human`  | Output format: `human`, `json`, or `sarif`.                            |
 | `output`             | *(stdout)* | File path to write output to.                                         |
 | `deny`               | `notice` | Fail the step when divergences at or above this severity exist.        |
@@ -234,17 +234,6 @@ Project-level config lives in `spec-drift.toml` at the project root. Every rule 
 ### `spec-drift.toml`
 
 ```toml
-[project]
-root    = "."
-include = ["src/**", "examples/**", "tests/**", "docs/**", "README.md", "AGENTS.md"]
-exclude = ["target/**", "vendor/**"]
-
-[analyzers]
-docs     = "on"       # on | off
-examples = "on"
-tests    = "on"
-ci       = "on"
-
 [severity]
 # Deterministic
 symbol_absence       = "critical"
@@ -273,9 +262,10 @@ max_calls = 50                 # per run; fail closed when exceeded
 timeout_s = 30
 
 # User-authored structural rules parsed from AGENTS.md or declared here.
-[rules.constraint_violation.handlers_return_result]
-glob    = "src/handlers/**"
-pattern = "fn * -> Result<_, ApiError>"
+[[rules.constraint_violation]]
+name        = "handlers_return_result"
+glob        = "src/handlers/**"
+return_type = "Result<_, ApiError>"
 ```
 
 ### Inline ignores

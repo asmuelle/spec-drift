@@ -385,6 +385,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_documented_constraint_rule_shape() {
+        let (_tmp, path) = write_config(
+            r#"
+            [[rules.constraint_violation]]
+            name = "handlers_return_result"
+            glob = "src/handlers/**"
+            return_type = "Result<_, ApiError>"
+        "#,
+        );
+
+        let cfg = Config::load(&path, ConfigSource::Discovered).unwrap();
+
+        assert_eq!(cfg.constraint_rules.len(), 1);
+        assert_eq!(cfg.constraint_rules[0].name, "handlers_return_result");
+        assert_eq!(
+            cfg.constraint_rules[0].return_type.as_deref(),
+            Some("Result<_, ApiError>")
+        );
+    }
+
+    #[test]
     fn rejects_unknown_severity_value() {
         let (_tmp, path) = write_config(
             r#"

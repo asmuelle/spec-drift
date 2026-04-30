@@ -57,9 +57,9 @@ impl FsWalker {
     }
 }
 
-/// `GitHistory` narrows file discovery to only files that have changed relative
-/// to a git ref (typically `HEAD`). Used by `--diff HEAD` so spec-drift can run
-/// as a fast pre-commit check instead of scanning the whole tree.
+/// `GitHistory` discovers files that have changed relative to a git ref
+/// (typically `HEAD`). Used by `--diff HEAD` so spec-drift can focus reports on
+/// changed files and drift plausibly induced by changed implementation.
 ///
 /// Shelling out to `git` keeps us free of a linked libgit dependency. When git
 /// is unavailable or the repo has no history, every method returns `None` and

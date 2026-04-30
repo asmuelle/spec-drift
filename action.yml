@@ -94,7 +94,20 @@ runs:
       if: steps.cache-spec-drift.outputs.cache-hit != 'true' && steps.download.outputs.downloaded != 'true'
       shell: bash
       run: |
-        cargo install --git https://github.com/asmuelle/spec-drift --branch "${{ inputs.version }}" --locked
+        set -euo pipefail
+        VERSION="${{ inputs.version }}"
+        INSTALL_REF=(--branch "$VERSION")
+        case "$VERSION" in
+          v*.*.*)
+            INSTALL_REF=(--tag "$VERSION")
+            ;;
+          *)
+            if [[ "$VERSION" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              INSTALL_REF=(--rev "$VERSION")
+            fi
+            ;;
+        esac
+        cargo install --git https://github.com/asmuelle/spec-drift "${INSTALL_REF[@]}" --locked
 
     - name: Add cargo bin to PATH
       shell: bash
