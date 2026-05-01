@@ -87,6 +87,18 @@ pub fn apply_strict(mut divs: Vec<Divergence>) -> Vec<Divergence> {
     divs
 }
 
+/// Render and baseline locations relative to the workspace root when possible.
+/// Analyzers work with absolute paths so suppression and blame can read files
+/// reliably; reporters should not leak machine-local temp or checkout paths.
+pub fn normalize_locations(mut divs: Vec<Divergence>, root: &Path) -> Vec<Divergence> {
+    for d in &mut divs {
+        if let Ok(rel) = d.location.file.strip_prefix(root) {
+            d.location.file = rel.to_path_buf();
+        }
+    }
+    divs
+}
+
 // ---------------------------------------------------------------------------
 // CLI orchestration
 // ---------------------------------------------------------------------------
@@ -214,6 +226,7 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     }
     divergences = apply_config(divergences, &config, &root);
     divergences = suppress::apply_inline_ignores(divergences);
+    divergences = normalize_locations(divergences, &root);
 
     if let Some(ref baseline_path) = cfg.baseline {
         let baseline = baseline::load(baseline_path)?;
@@ -408,5 +421,17 @@ mod tests {
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule, RuleId::GhostCommand);
+    }
+
+    #[test]
+    fn normalize_locations_strips_workspace_root() {
+        let root = Path::new("/repo");
+        let out = normalize_locations(
+            vec![div("/repo/README.md"), div("/elsewhere/file.md")],
+            root,
+        );
+
+        assert_eq!(out[0].location.file, PathBuf::from("README.md"));
+        assert_eq!(out[1].location.file, PathBuf::from("/elsewhere/file.md"));
     }
 }
