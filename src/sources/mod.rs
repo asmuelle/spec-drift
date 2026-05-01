@@ -67,9 +67,10 @@ impl FsWalker {
 pub struct GitHistory;
 
 impl GitHistory {
-    /// Return the set of files changed between `reference` and the working
-    /// tree, relative to `root`. `None` means "can't answer — fall back to a
-    /// full walk" (git missing, not a repo, unknown ref, etc.).
+    /// Return the set of tracked files changed between `reference` and the
+    /// working tree, plus untracked files that are not ignored. `None` means
+    /// "can't answer — fall back to a full walk" (git missing, not a repo,
+    /// unknown ref, etc.).
     pub fn changed_files(root: &Path, reference: &str) -> Option<HashSet<PathBuf>> {
         let out = Command::new("git")
             .current_dir(root)
@@ -79,13 +80,29 @@ impl GitHistory {
         if !out.status.success() {
             return None;
         }
-        let text = String::from_utf8(out.stdout).ok()?;
-        let set: HashSet<PathBuf> = text
+        let mut set: HashSet<PathBuf> = String::from_utf8(out.stdout)
+            .ok()?
             .lines()
             .map(|l| l.trim())
             .filter(|l| !l.is_empty())
             .map(|l| root.join(l))
             .collect();
+
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["ls-files", "--others", "--exclude-standard"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        for path in String::from_utf8(out.stdout).ok()?.lines() {
+            let path = path.trim();
+            if !path.is_empty() {
+                set.insert(root.join(path));
+            }
+        }
+
         Some(set)
     }
 
