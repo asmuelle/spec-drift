@@ -1,6 +1,6 @@
 use crate::domain::{ClaimKind, Location, SpecClaim};
 use crate::error::SpecDriftError;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use std::path::Path;
 
 pub struct MarkdownParser;
@@ -147,15 +147,25 @@ mod tests {
         std::fs::write(&path, "# API\n\n```rust\nfn main() {}\n```\n").unwrap();
 
         let claims = MarkdownParser::parse(&path).unwrap();
-        let has_fenced = claims.iter().any(|c| c.text.contains("fenced code block: rust"));
-        assert!(has_fenced, "should extract fenced code block tag, got {:?}", claims);
+        let has_fenced = claims
+            .iter()
+            .any(|c| c.text.contains("fenced code block: rust"));
+        assert!(
+            has_fenced,
+            "should extract fenced code block tag, got {:?}",
+            claims
+        );
     }
 
     #[test]
     fn extracts_full_code_block_content() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("README.md");
-        std::fs::write(&path, "# Example\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n").unwrap();
+        std::fs::write(
+            &path,
+            "# Example\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n",
+        )
+        .unwrap();
 
         let blocks = MarkdownBlocks::extract_code_blocks(&path).unwrap();
         assert_eq!(blocks.len(), 1);
@@ -167,7 +177,11 @@ mod tests {
     fn multiple_fenced_blocks_extracted() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("README.md");
-        std::fs::write(&path, "```sh\ncargo build\n```\n\n```rust\nlet x = 1;\n```\n").unwrap();
+        std::fs::write(
+            &path,
+            "```sh\ncargo build\n```\n\n```rust\nlet x = 1;\n```\n",
+        )
+        .unwrap();
 
         let blocks = MarkdownBlocks::extract_code_blocks(&path).unwrap();
         assert_eq!(blocks.len(), 2);

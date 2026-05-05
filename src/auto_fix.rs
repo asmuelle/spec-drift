@@ -41,16 +41,17 @@ pub fn suggest_fix(divergence: &Divergence, workspace_root: &Path) -> Option<Aut
 }
 
 fn suggest_symbol_fix(divergence: &Divergence, workspace_root: &Path) -> Option<AutoFix> {
-    // The `stated` field contains the old name claimed in docs.
+    // The `stated` field renders the old name claimed in docs, e.g.
+    // "`Client::new` exists in the codebase".
     // The `reality` field explains it doesn't exist.
     // Try to find a similar name in the codebase.
-    let old_name = divergence.stated.trim();
+    let old_name = extract_stated_symbol(&divergence.stated)?;
     if old_name.is_empty() {
         return None;
     }
 
     // Search for similar symbols (simple fuzzy match)
-    let candidates = find_similar_symbols(workspace_root, old_name);
+    let candidates = find_similar_symbols(workspace_root, &old_name);
     let replacement = candidates.first()?;
 
     Some(AutoFix {
@@ -60,10 +61,20 @@ fn suggest_symbol_fix(divergence: &Divergence, workspace_root: &Path) -> Option<
             "Replace `{}` with `{}` in documentation",
             old_name, replacement
         ),
-        old_text: Some(old_name.to_string()),
+        old_text: Some(old_name),
         new_text: Some(replacement.clone()),
         auto_applicable: candidates.len() == 1,
     })
+}
+
+fn extract_stated_symbol(stated: &str) -> Option<String> {
+    let raw = stated
+        .split_once('`')
+        .and_then(|(_, rest)| rest.split_once('`').map(|(symbol, _)| symbol))
+        .unwrap_or(stated)
+        .trim();
+    let symbol = raw.strip_suffix("()").unwrap_or(raw).trim();
+    (!symbol.is_empty()).then(|| symbol.to_string())
 }
 
 fn suggest_ghost_command_fix(divergence: &Divergence) -> Option<AutoFix> {
@@ -76,7 +87,8 @@ fn suggest_ghost_command_fix(divergence: &Divergence) -> Option<AutoFix> {
     let prefix = if is_package { "--package" } else { "--bin" };
 
     // Find what comes after --package or --bin
-    let cmd = stated.split_whitespace()
+    let cmd = stated
+        .split_whitespace()
         .skip_while(|w| *w != prefix)
         .nth(1)?;
 
@@ -146,24 +158,69 @@ fn tokenize_rust(src: &str) -> Vec<String> {
         if ch.is_alphanumeric() || ch == '_' {
             current.push(ch);
         } else {
-            if !current.is_empty() && current.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+            if !current.is_empty()
+                && current
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_alphabetic() || c == '_')
+            {
                 tokens.push(current.clone());
             }
             current.clear();
         }
     }
-    if !current.is_empty() && current.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+    if !current.is_empty()
+        && current
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_alphabetic() || c == '_')
+    {
         tokens.push(current);
     }
     tokens
 }
 
-/// Simple string similarity based on common prefix/suffix length.
+/// Identifier similarity after normalizing separators.
 fn similarity(a: &str, b: &str) -> f64 {
+    let a = normalize_identifier(a);
+    let b = normalize_identifier(b);
+    let max_len = a.chars().count().max(b.chars().count());
+    if max_len == 0 {
+        return 0.0;
+    }
+    if a == b {
+        return 1.0;
+    }
+    let distance = levenshtein(&a, &b);
+    let edit_score = 1.0 - (distance as f64 / max_len as f64);
     let common_prefix = a.chars().zip(b.chars()).take_while(|(a, b)| a == b).count();
-    let max_len = a.len().max(b.len());
-    if max_len == 0 { return 0.0; }
-    common_prefix as f64 / max_len as f64
+    let prefix_score = common_prefix as f64 / max_len as f64;
+    edit_score * prefix_score
+}
+
+fn normalize_identifier(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (curr[j] + 1).min(prev[j + 1] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b.len()]
 }
 
 /// Auto-fix runner: apply all auto-applicable fixes.
@@ -177,8 +234,13 @@ pub fn apply_fixes(divergences: &[Divergence], workspace_root: &Path) -> u32 {
                 continue;
             }
             if let (Some(old), Some(new)) = (&fix.old_text, &fix.new_text) {
-                if apply_text_fix(&fix.file, fix.line, old, new) {
-                    eprintln!("  Fixed: {} (line {}) — {}", fix.file.display(), fix.line, fix.description);
+                if apply_text_fix(workspace_root, &fix.file, fix.line, old, new) {
+                    eprintln!(
+                        "  Fixed: {} (line {}) — {}",
+                        fix.file.display(),
+                        fix.line,
+                        fix.description
+                    );
                     applied += 1;
                 }
             }
@@ -187,41 +249,32 @@ pub fn apply_fixes(divergences: &[Divergence], workspace_root: &Path) -> u32 {
     applied
 }
 
-fn apply_text_fix(file: &Path, line: u32, old: &str, new: &str) -> bool {
-    let Ok(contents) = std::fs::read_to_string(file) else { return false };
-    let lines: Vec<&str> = contents.lines().collect();
+fn apply_text_fix(workspace_root: &Path, file: &Path, line: u32, old: &str, new: &str) -> bool {
+    let path = resolve_fix_path(workspace_root, file);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let mut lines: Vec<String> = contents.lines().map(str::to_string).collect();
     let idx = (line as usize).saturating_sub(1);
     if idx >= lines.len() {
         return false;
     }
-    let target = lines[idx];
-    if let Some(pos) = target.find(old) {
-        let mut new_line = target.to_string();
-        new_line.replace_range(pos..pos + old.len(), new);
-        let mut new_lines = lines.clone();
-        new_lines[idx] = &new_line;
-        // This won't work as-is due to borrow checking — need owned strings
-        let new_contents: Vec<String> = lines.iter().enumerate().map(|(i, l)| {
-            if i == idx {
-                let mut s = l.to_string();
-                if let Some(p) = s.find(old) {
-                    s.replace_range(p..p + old.len(), new);
-                }
-                s
-            } else {
-                l.to_string()
-            }
-        }).collect();
-        let output = new_contents.join("\n");
-        // Preserve trailing newline
-        let output = if contents.ends_with('\n') {
-            output + "\n"
-        } else {
-            output
-        };
-        std::fs::write(file, output).is_ok()
+    let Some(pos) = lines[idx].find(old) else {
+        return false;
+    };
+    lines[idx].replace_range(pos..pos + old.len(), new);
+    let mut output = lines.join("\n");
+    if contents.ends_with('\n') {
+        output.push('\n');
+    }
+    std::fs::write(path, output).is_ok()
+}
+
+fn resolve_fix_path(workspace_root: &Path, file: &Path) -> std::path::PathBuf {
+    if file.is_absolute() {
+        file.to_path_buf()
     } else {
-        false
+        workspace_root.join(file)
     }
 }
 
@@ -234,6 +287,36 @@ mod tests {
         assert!(similarity("connect_to_db", "connect_to_db") > 0.9);
         assert!(similarity("init_connection", "connect_to_db") < 0.5);
         assert!(similarity("login", "log_in") > 0.5);
+    }
+
+    #[test]
+    fn extracts_symbol_from_rendered_stated_text() {
+        assert_eq!(
+            extract_stated_symbol("`Client::new` exists in the codebase").as_deref(),
+            Some("Client::new")
+        );
+        assert_eq!(
+            extract_stated_symbol("`connect_to_db()` exists in the codebase").as_deref(),
+            Some("connect_to_db")
+        );
+    }
+
+    #[test]
+    fn apply_text_fix_resolves_relative_path_against_workspace_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let readme = tmp.path().join("README.md");
+        std::fs::write(&readme, "Use `old_name()`.\n").unwrap();
+
+        assert!(apply_text_fix(
+            tmp.path(),
+            Path::new("README.md"),
+            1,
+            "old_name",
+            "new_name",
+        ));
+
+        let out = std::fs::read_to_string(readme).unwrap();
+        assert_eq!(out, "Use `new_name()`.\n");
     }
 
     #[test]
