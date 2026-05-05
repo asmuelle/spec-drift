@@ -99,17 +99,13 @@ impl MarkdownBlocks {
                         CodeBlockKind::Indented => String::new(),
                     };
                 }
-                Event::End(TagEnd::CodeBlock) => {
-                    if in_code_block {
-                        blocks.push((current_lang.clone(), current_content.clone()));
-                        current_content.clear();
-                        in_code_block = false;
-                    }
+                Event::End(TagEnd::CodeBlock) if in_code_block => {
+                    blocks.push((current_lang.clone(), current_content.clone()));
+                    current_content.clear();
+                    in_code_block = false;
                 }
-                Event::Text(text) => {
-                    if in_code_block {
-                        current_content.push_str(&text);
-                    }
+                Event::Text(text) if in_code_block => {
+                    current_content.push_str(&text);
                 }
                 _ => {}
             }

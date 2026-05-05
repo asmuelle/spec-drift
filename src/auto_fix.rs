@@ -162,7 +162,7 @@ fn tokenize_rust(src: &str) -> Vec<String> {
                 && current
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_alphabetic() || c == '_')
+                    .is_some_and(|c| c.is_alphabetic() || c == '_')
             {
                 tokens.push(current.clone());
             }
@@ -173,7 +173,7 @@ fn tokenize_rust(src: &str) -> Vec<String> {
         && current
             .chars()
             .next()
-            .map_or(false, |c| c.is_alphabetic() || c == '_')
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
     {
         tokens.push(current);
     }
@@ -233,16 +233,16 @@ pub fn apply_fixes(divergences: &[Divergence], workspace_root: &Path) -> u32 {
             if !fix.auto_applicable {
                 continue;
             }
-            if let (Some(old), Some(new)) = (&fix.old_text, &fix.new_text) {
-                if apply_text_fix(workspace_root, &fix.file, fix.line, old, new) {
-                    eprintln!(
-                        "  Fixed: {} (line {}) — {}",
-                        fix.file.display(),
-                        fix.line,
-                        fix.description
-                    );
-                    applied += 1;
-                }
+            if let (Some(old), Some(new)) = (&fix.old_text, &fix.new_text)
+                && apply_text_fix(workspace_root, &fix.file, fix.line, old, new)
+            {
+                eprintln!(
+                    "  Fixed: {} (line {}) — {}",
+                    fix.file.display(),
+                    fix.line,
+                    fix.description
+                );
+                applied += 1;
             }
         }
     }
