@@ -6,6 +6,7 @@
 //! CLI wrapper over [`run_cli`].
 
 pub mod analyzers;
+pub mod auto_fix;
 pub mod baseline;
 pub mod blame;
 pub mod config;
@@ -128,6 +129,7 @@ pub struct RunConfig {
     pub strict: bool,
     pub no_llm: bool,
     pub blame: bool,
+    pub fix: bool,
 }
 
 impl Default for RunConfig {
@@ -145,6 +147,7 @@ impl Default for RunConfig {
             strict: false,
             no_llm: false,
             blame: false,
+            fix: false,
         }
     }
 }
@@ -239,6 +242,11 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
 
     if cfg.blame {
         divergences = blame::apply(divergences, &root, &blame::GitBlameEngine);
+    }
+
+    if cfg.fix {
+        let applied = auto_fix::apply_fixes(&divergences, &root);
+        eprintln!("spec-drift: applied {applied} auto-fix(es)");
     }
 
     let rendered = if cfg.fix_prompt {

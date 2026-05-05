@@ -70,6 +70,11 @@ struct Cli {
     /// Spawns one `git blame` per divergence; off by default.
     #[arg(long)]
     blame: bool,
+
+    /// Auto-apply fixes for deterministic rules (symbol_absence, ghost_command).
+    /// Writes changes directly to source files. Use with caution.
+    #[arg(long)]
+    fix: bool,
 }
 
 fn main() -> ExitCode {
@@ -115,5 +120,6 @@ fn into_run_config(cli: Cli) -> RunConfig {
         strict: cli.strict,
         no_llm: cli.no_llm,
         blame: cli.blame,
+        fix: cli.fix,
     }
 }
