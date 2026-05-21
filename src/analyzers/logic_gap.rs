@@ -156,11 +156,19 @@ mod tests {
         fn evaluate(&self, _: &str, _: &str) -> Option<LlmVerdict> {
             Some(self.0.clone())
         }
+
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
+            Some(self.0.reason.clone())
+        }
     }
 
     struct NullClient;
     impl LlmClient for NullClient {
         fn evaluate(&self, _: &str, _: &str) -> Option<LlmVerdict> {
+            None
+        }
+
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
             None
         }
     }

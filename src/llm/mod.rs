@@ -16,6 +16,7 @@
 
 pub mod anthropic;
 pub mod null;
+pub mod openai;
 
 use crate::config::{LlmConfig, LlmProvider};
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 pub use anthropic::AnthropicLlmClient;
 pub use null::NullLlmClient;
+pub use openai::OpenAiLlmClient;
 
 /// Verdict an LLM returns when asked whether a spec claim still matches code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,10 @@ pub trait LlmClient: Send + Sync {
     /// `system_prompt`. Returns `None` on any failure mode — analyzers treat
     /// `None` as "skip, don't flag."
     fn evaluate(&self, system_prompt: &str, user_prompt: &str) -> Option<LlmVerdict>;
+
+    /// Complete raw text from the model given `system_prompt` and `user_prompt`.
+    /// Returns `None` on any failure mode.
+    fn complete(&self, system_prompt: &str, user_prompt: &str) -> Option<String>;
 }
 
 /// Budget + kill-switch wrapper. Every real LLM call flows through here.
@@ -74,6 +80,23 @@ impl LlmClient for BudgetedClient {
         }
         self.inner.evaluate(system_prompt, user_prompt)
     }
+
+    fn complete(&self, system_prompt: &str, user_prompt: &str) -> Option<String> {
+        loop {
+            let current = self.remaining.load(Ordering::Acquire);
+            if current == 0 {
+                return None;
+            }
+            if self
+                .remaining
+                .compare_exchange(current, current - 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break;
+            }
+        }
+        self.inner.complete(system_prompt, user_prompt)
+    }
 }
 
 /// Build the LLM client stack described by `cfg`. `force_off=true` mirrors
@@ -101,12 +124,23 @@ pub fn build_client(cfg: &LlmConfig, force_off: bool) -> Arc<dyn LlmClient> {
             }
         }
         LlmProvider::OpenAi | LlmProvider::Local => {
-            eprintln!(
-                "spec-drift: [llm].provider {:?} is not implemented yet; \
-                 skipping LLM rules for this run.",
-                cfg.provider
-            );
-            Arc::new(NullLlmClient)
+            match OpenAiLlmClient::new(cfg.provider, cfg.model.clone(), cfg.timeout_s) {
+                Some(c) => Arc::new(c),
+                None => {
+                    if cfg.provider == LlmProvider::OpenAi {
+                        eprintln!(
+                            "spec-drift: [llm] enabled with openai provider but OPENAI_API_KEY is not set; \
+                             skipping LLM rules for this run."
+                        );
+                    } else {
+                        eprintln!(
+                            "spec-drift: [llm] enabled with local provider but creation failed; \
+                             skipping LLM rules for this run."
+                        );
+                    }
+                    Arc::new(NullLlmClient)
+                }
+            }
         }
     };
 
@@ -129,6 +163,11 @@ mod tests {
                 match_spec: true,
                 reason: "ok".into(),
             })
+        }
+
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            Some("ok".into())
         }
     }
 

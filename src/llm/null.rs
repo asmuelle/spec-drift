@@ -10,6 +10,10 @@ impl LlmClient for NullLlmClient {
     fn evaluate(&self, _system_prompt: &str, _user_prompt: &str) -> Option<LlmVerdict> {
         None
     }
+
+    fn complete(&self, _system_prompt: &str, _user_prompt: &str) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(test)]

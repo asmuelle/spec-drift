@@ -209,11 +209,11 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     });
 
     let mut ctx = ProjectContext::new(&root);
-    ctx.analysis_root = analysis_root;
-    ctx.rust_files = files.rust;
-    ctx.markdown_files = files.markdown;
-    ctx.yaml_files = files.yaml;
-    ctx.makefile_files = files.makefiles;
+    ctx.analysis_root = analysis_root.clone();
+    ctx.rust_files = files.rust.clone();
+    ctx.markdown_files = files.markdown.clone();
+    ctx.yaml_files = files.yaml.clone();
+    ctx.makefile_files = files.makefiles.clone();
 
     for rs in &ctx.rust_files {
         match parsers::RustParser::parse(rs) {
@@ -247,6 +247,22 @@ pub fn run_cli(cfg: &RunConfig) -> anyhow::Result<ExitCode> {
     if cfg.fix {
         let applied = auto_fix::apply_fixes(&divergences, &root);
         eprintln!("spec-drift: applied {applied} auto-fix(es)");
+
+        let llm_client = llm::build_client(&config.llm, cfg.no_llm);
+        let nd_applied = apply_nondeterministic_fixes(
+            &root,
+            &analysis_root,
+            &files,
+            cfg.pillar,
+            &config,
+            cfg.no_llm,
+            &divergences,
+            &llm_client,
+            &ctx,
+        )?;
+        if nd_applied > 0 {
+            eprintln!("spec-drift: applied {nd_applied} coherency auto-correction(s)");
+        }
     }
 
     let rendered = if cfg.fix_prompt {
@@ -376,6 +392,145 @@ fn build_analyzers(pillar: Pillar, config: &Config, no_llm: bool) -> Vec<Box<dyn
     v
 }
 
+#[allow(clippy::too_many_arguments)]
+fn apply_nondeterministic_fixes(
+    root: &Path,
+    analysis_root: &Path,
+    files: &sources::DiscoveredFiles,
+    pillar: Pillar,
+    config: &Config,
+    no_llm: bool,
+    divergences: &[Divergence],
+    llm_client: &std::sync::Arc<dyn llm::LlmClient>,
+    ctx: &ProjectContext,
+) -> anyhow::Result<u32> {
+    let mut applied = 0;
+
+    for d in divergences {
+        if d.rule == RuleId::OutdatedLogic {
+            let abs_path = root.join(&d.location.file);
+            if let Some((original_section, range)) =
+                auto_fix::slice_markdown_section(&abs_path, d.location.line)
+            {
+                let code_context = auto_fix::build_outdated_logic_context(ctx, &original_section);
+                let (system, user) = auto_fix::build_markdown_correction_prompt(
+                    &original_section,
+                    &code_context,
+                    &d.reality,
+                );
+
+                eprintln!(
+                    "  Coherency Auto-Correction (OutdatedLogic): {}",
+                    d.location.file.display()
+                );
+                if let Some(corrected) = llm_client.complete(&system, &user) {
+                    let corrected = corrected.trim().to_string();
+                    if !corrected.is_empty() {
+                        let original_content = std::fs::read_to_string(&abs_path)?;
+                        let mut new_content = original_content.clone();
+                        new_content.replace_range(range.clone(), &corrected);
+
+                        // Transaction: write new content
+                        std::fs::write(&abs_path, &new_content)?;
+
+                        // Validation sweep
+                        if run_validation_sweep(root, analysis_root, files, pillar, config, no_llm)
+                        {
+                            eprintln!("    [OK] Passed validation!");
+                            applied += 1;
+                        } else {
+                            eprintln!(
+                                "    [ROLLBACK] Validation failed (compile error or critical regression). Rolling back..."
+                            );
+                            std::fs::write(&abs_path, &original_content)?;
+                        }
+                    }
+                }
+            }
+        } else if d.rule == RuleId::LogicGap {
+            let abs_path = root.join(&d.location.file);
+            if let Some((original_narrative, range)) = auto_fix::slice_example_narrative(&abs_path)
+            {
+                let public_signatures = auto_fix::collect_public_signatures(ctx);
+                let (system, user) = auto_fix::build_example_narrative_prompt(
+                    &original_narrative,
+                    &public_signatures,
+                    &d.reality,
+                );
+
+                eprintln!(
+                    "  Coherency Auto-Correction (LogicGap): {}",
+                    d.location.file.display()
+                );
+                if let Some(corrected_narrative) = llm_client.complete(&system, &user) {
+                    let original_content = std::fs::read_to_string(&abs_path)?;
+                    let first_line = original_content[range.clone()].lines().next().unwrap_or("");
+                    let prefix = if first_line.trim_start().starts_with("//!") {
+                        "//!"
+                    } else {
+                        "//"
+                    };
+
+                    let formatted_comments =
+                        auto_fix::format_as_comments(&corrected_narrative, prefix);
+                    let mut new_content = original_content.clone();
+                    new_content.replace_range(range.clone(), &formatted_comments);
+
+                    // Transaction: write new content
+                    std::fs::write(&abs_path, &new_content)?;
+
+                    // Validation sweep
+                    if run_validation_sweep(root, analysis_root, files, pillar, config, no_llm) {
+                        eprintln!("    [OK] Passed validation!");
+                        applied += 1;
+                    } else {
+                        eprintln!(
+                            "    [ROLLBACK] Validation failed (compile error or critical regression). Rolling back..."
+                        );
+                        std::fs::write(&abs_path, &original_content)?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(applied)
+}
+
+fn run_validation_sweep(
+    root: &Path,
+    analysis_root: &Path,
+    files: &sources::DiscoveredFiles,
+    pillar: Pillar,
+    config: &Config,
+    no_llm: bool,
+) -> bool {
+    let mut val_ctx = ProjectContext::new(root);
+    val_ctx.analysis_root = analysis_root.to_path_buf();
+    val_ctx.rust_files = files.rust.clone();
+    val_ctx.markdown_files = files.markdown.clone();
+    val_ctx.yaml_files = files.yaml.clone();
+    val_ctx.makefile_files = files.makefiles.clone();
+
+    for rs in &val_ctx.rust_files {
+        if let Ok(facts) = parsers::RustParser::parse(rs) {
+            val_ctx.code_facts.extend(facts);
+        }
+    }
+
+    let analyzers = build_analyzers(pillar, config, no_llm);
+    let divergences = run(&val_ctx, &analyzers);
+    let divergences = apply_config(divergences, config, root);
+    let divergences = suppress::apply_inline_ignores(divergences);
+
+    for d in &divergences {
+        if d.rule == RuleId::CompileFailure || d.severity == Severity::Critical {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +596,116 @@ mod tests {
 
         assert_eq!(out[0].location.file, PathBuf::from("README.md"));
         assert_eq!(out[1].location.file, PathBuf::from("/elsewhere/file.md"));
+    }
+
+    struct MockLlmClient {
+        complete_val: String,
+    }
+    impl llm::LlmClient for MockLlmClient {
+        fn evaluate(&self, _: &str, _: &str) -> Option<crate::llm::LlmVerdict> {
+            None
+        }
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
+            Some(self.complete_val.clone())
+        }
+    }
+
+    #[test]
+    fn test_nondeterministic_fixes_transaction_success_and_rollback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let readme_path = root.join("README.md");
+        std::fs::write(
+            &readme_path,
+            "## Section 1\nUse `old_function()` to start.\n",
+        )
+        .unwrap();
+
+        let lib_path = root.join("src/lib.rs");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(&lib_path, "pub fn new_function() {}\n").unwrap();
+
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        let files = sources::DiscoveredFiles {
+            rust: vec![lib_path.clone()],
+            markdown: vec![readme_path.clone()],
+            yaml: vec![],
+            makefiles: vec![],
+        };
+
+        let mut ctx = ProjectContext::new(root);
+        ctx.analysis_root = root.to_path_buf();
+        ctx.rust_files = vec![lib_path.clone()];
+        ctx.markdown_files = vec![readme_path.clone()];
+        ctx.code_facts = crate::parsers::RustParser::parse(&lib_path).unwrap();
+
+        let divergences = vec![Divergence {
+            rule: RuleId::OutdatedLogic,
+            severity: Severity::Notice,
+            location: Location::new("README.md", 1),
+            stated: "section describes current behavior".into(),
+            reality: "Outdated!".into(),
+            risk: "Docs teach behavior the code no longer implements.".into(),
+            attribution: None,
+        }];
+
+        let mock_client_success: std::sync::Arc<dyn llm::LlmClient> =
+            std::sync::Arc::new(MockLlmClient {
+                complete_val: "## Section 1\nUse `new_function()` to start.\n".to_string(),
+            });
+
+        let config = Config::default();
+
+        let applied_success = apply_nondeterministic_fixes(
+            root,
+            root,
+            &files,
+            Pillar::Docs,
+            &config,
+            false,
+            &divergences,
+            &mock_client_success,
+            &ctx,
+        )
+        .unwrap();
+
+        assert_eq!(applied_success, 1);
+        let content_success = std::fs::read_to_string(&readme_path).unwrap();
+        assert!(content_success.contains("new_function"));
+
+        std::fs::write(
+            &readme_path,
+            "## Section 1\nUse `old_function()` to start.\n",
+        )
+        .unwrap();
+
+        let mock_client_fail: std::sync::Arc<dyn llm::LlmClient> =
+            std::sync::Arc::new(MockLlmClient {
+                complete_val: "## Section 1\nUse `missing_function()` to start.\n".to_string(),
+            });
+
+        let applied_fail = apply_nondeterministic_fixes(
+            root,
+            root,
+            &files,
+            Pillar::Docs,
+            &config,
+            false,
+            &divergences,
+            &mock_client_fail,
+            &ctx,
+        )
+        .unwrap();
+
+        assert_eq!(applied_fail, 0);
+        let content_fail = std::fs::read_to_string(&readme_path).unwrap();
+        assert!(content_fail.contains("old_function"));
+        assert!(!content_fail.contains("missing_function"));
     }
 }

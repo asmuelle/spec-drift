@@ -71,6 +71,20 @@ impl LlmClient for AnthropicLlmClient {
 
         parse_verdict(&text)
     }
+
+    fn complete(&self, system_prompt: &str, user_prompt: &str) -> Option<String> {
+        let resp = self.call(system_prompt, user_prompt)?;
+        let text: String = resp
+            .content
+            .into_iter()
+            .filter_map(|c| match c {
+                ContentBlock::Text { text } => Some(text),
+                ContentBlock::Other => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(text)
+    }
 }
 
 /// Parse a JSON verdict out of the model's text response. The prompt asks the

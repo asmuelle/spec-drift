@@ -239,11 +239,20 @@ mod tests {
             self.was_called.store(true, Ordering::Release);
             Some(self.verdict.clone())
         }
+
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
+            self.was_called.store(true, Ordering::Release);
+            Some(self.verdict.reason.clone())
+        }
     }
 
     struct BlankClient;
     impl LlmClient for BlankClient {
         fn evaluate(&self, _: &str, _: &str) -> Option<LlmVerdict> {
+            None
+        }
+
+        fn complete(&self, _: &str, _: &str) -> Option<String> {
             None
         }
     }
