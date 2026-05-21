@@ -217,7 +217,7 @@ jobs:
 
 | Input                | Default  | Purpose                                                                |
 |----------------------|----------|------------------------------------------------------------------------|
-| `version`            | `v0.1.0` | git ref (branch, tag, or SHA) to install.                              |
+| `version`            | `v0.2.0` | git ref (branch, tag, or SHA) to install.                              |
 | `format`             | `human`  | Output format: `human`, `json`, or `sarif`.                            |
 | `output`             | *(stdout)* | File path to write output to.                                         |
 | `deny`               | `notice` | Fail the step when divergences at or above this severity exist.        |
